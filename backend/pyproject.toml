@@ -1,0 +1,27 @@
+[project]
+name = "repurposer"
+version = "0.1.0"
+description = "YouTube podcast -> vertical short-form clips with karaoke captions"
+requires-python = ">=3.10"
+dependencies = [
+    "yt-dlp>=2024.10.0",
+    "faster-whisper>=1.0.3",
+    "anthropic>=0.40.0",
+    "openai>=1.50.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.8.0",
+    "python-multipart>=0.0.9",
+    "click>=8.1.0",
+]
+
+[project.scripts]
+repurpose = "repurposer.cli:main"
+repurpose-server = "repurposer.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["repurposer*"]

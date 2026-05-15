@@ -1,24 +1,40 @@
-# See https://help.github.com/ignore-files/ for more about ignoring files.
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
 
-# dependencies
-/node_modules
+# Node
+node_modules/
+dist/
+.vite/
 
-# testing
-/coverage
+# Working output
+output/
+work/
+*.mp4
+*.m4a
+*.wav
+*.webm
+!frontend/public/*.mp4
 
-# production
-/build
-/built-lambda
+# Whisper model cache
+.cache/
+models/
 
-/.netlify
-
-# misc
-.DS_Store
+# Env / secrets
+.env
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*.local
 
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
