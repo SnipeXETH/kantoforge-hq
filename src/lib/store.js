@@ -24,6 +24,9 @@ export const DEFAULT_SETTINGS = {
     postagePerOrderShopify: 3.5,
     fallbackItemCost: 0, // used when no product cost rule matches
   },
+  // months manually marked "no sales" on the import coverage grid,
+  // keyed "YYYY-MM:platform"
+  coverageMarks: {},
 };
 
 // Deep-merge saved settings over defaults so new settings fields added in
