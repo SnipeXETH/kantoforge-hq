@@ -1,108 +1,88 @@
-## Create-React-App-Lambda
+# KantoForge HQ
 
-This project is a reference demo showing you how to use [Create React App v3](https://github.com/facebookincubator/create-react-app) and [netlify-lambda v1](https://github.com/netlify/netlify-lambda) together in a [Netlify Dev](https://www.netlify.com/docs/cli/?utm_source=github&utm_medium=swyx-CRAL&utm_campaign=devex#netlify-dev-beta) workflow. You can clone this and immediately be productive with a React app with serverless Netlify Functions in the same repo. Alternatively you can deploy straight to Netlify with this one-click Deploy:
+The internal admin platform for [KantoForge](https://kantoforge.com) — one place for you and the
+team to log in, import sales from Shopify and Etsy, track true costs, see real profit, and manage
+tasks together.
 
+## What's inside
 
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg?utm_source=github&utm_medium=swyx-CRAL&utm_campaign=devex)](https://app.netlify.com/start/deploy?repository=https://github.com/netlify/create-react-app-lambda&utm_source=github&utm_medium=swyx-CRAL&utm_campaign=devex)
+| Tool | What it does |
+|---|---|
+| **Dashboard** | Revenue, fees, gross profit and net-after-overheads at a glance, monthly revenue vs profit chart, platform split donut, Shopify vs Etsy scorecard. |
+| **Analytics** | Full P&L for any date range, monthly revenue/profit by platform, fee breakdown (where every penny of fees goes), top products by profit, sortable product table. |
+| **Orders & imports** | Drag-and-drop CSV import for Shopify order exports and Etsy sold-orders / sold-order-items files. Re-importing is safe — orders merge by ID, never duplicate. Searchable order list with per-order profit. |
+| **Costs** | Product cost rules (match by SKU or name), per-order packaging and postage defaults, fixed monthly overheads. Flags imported products that don't have a cost rule yet. |
+| **Pricing calculator** | What-if tool: enter a price and your costs, see the exact fee breakdown and take-home on either platform — plus the price you'd need to hit a target margin. |
+| **Tasks** | Shared kanban board (to do / in progress / done) with assignees, priorities and due dates. |
+| **Team** | Invite colleagues with their own logins, admin/member roles, password resets. |
+| **Settings** | Every fee rate is editable (Etsy transaction/payment/listing/regulatory/offsite-ads, Shopify payment rates), currency, and data export/restore. |
 
-> ⚠️NOTE: You may not need this project at all. [Netlify Dev](https://github.com/netlify/netlify-dev-plugin) works with `create-react-app` out of the box! Only use `netlify-lambda` if you need a build step for your functions, eg if you want to use Babel or TypeScript ([see its README for details](https://github.com/netlify/netlify-lambda/blob/master/README.md#netlify-lambda)).
-
-## Project Setup
-
-**Source**: The main addition to base Create-React-App is a new folder: `src/lambda`. This folder is specified and can be changed in the `package.json` script: `"build:lambda": "netlify-lambda build src/lambda"`.
-
-**Dist**: Each JavaScript file in there will be built for Netlify Function deployment in `/built-lambda`, specified in [`netlify.toml`](https://www.netlify.com/docs/netlify-toml-reference/?utm_source=github&utm_medium=swyx-CRAL&utm_campaign=devex).
-
-As an example, we've included a small `src/lambda/hello.js` function, which will be deployed to `/.netlify/functions/hello`. We've also included an async lambda example using async/await syntax in `async-dadjoke.js`.
-
-## Video
-
-Learn how to set this up yourself (and why everything is the way it is) from scratch in a video: https://www.youtube.com/watch?v=3ldSM98nCHI
-
-## Babel/webpack compilation
-
-All functions (inside `src/lambda`) are compiled with webpack using Babel, so you can use modern JavaScript, import npm modules, etc., without any extra setup.
-
-## Local Development
+## Getting started
 
 ```bash
-## prep steps for first time users
-npm i -g netlify-cli # Make sure you have the [Netlify CLI](https://github.com/netlify/cli) installed
-git clone https://github.com/netlify/create-react-app-lambda ## clone this repo
-cd create-react-app-lambda ## change into this repo
-yarn # install all dependencies
-
-## done every time you start up this project
-ntl dev ## nice shortcut for `netlify dev`, starts up create-react-app AND a local Node.js server for your Netlify functions
+yarn install
+yarn start        # dev server on http://localhost:3000
+yarn build        # production build in ./build
 ```
 
-This fires up [Netlify Dev](https://www.netlify.com/docs/cli/?utm_source=github&utm_medium=swyx-CRAL&utm_campaign=devex#netlify-dev-beta), which:
+The repo ships with `netlify.toml`, so pushing to a Netlify-connected repo deploys it as-is.
 
-- Detects that you are running a `create-react-app` project and runs the npm script that contains `react-scripts start`, which in this project is the `start` script
-- Detects that you use `netlify-lambda` as a [function builder](https://github.com/netlify/netlify-dev-plugin/#function-builders-function-builder-detection-and-relationship-with-netlify-lambda), and runs the npm script that contains `netlify-lambda build`, which in this project is the `build:lambda` script.
+First visit shows a **Create owner account** screen — that's you (admin). Then:
 
-You can view the project locally via Netlify Dev, via `localhost:8888`.
+1. **Costs** → add product cost rules and your fixed monthly overheads.
+2. **Settings** → check the fee rates match your latest Etsy/Shopify statements (UK defaults included).
+3. **Orders & imports** → upload:
+   - Shopify: *Admin → Orders → Export → Export orders (plain CSV)*
+   - Etsy: *Shop Manager → Settings → Options → Download Data* — download **both** the
+     `Orders` and `Order Items` CSVs and import both (the items file adds per-product detail;
+     the orders file adds actual card-processing fees).
+4. **Team** → add your colleagues.
 
-Each function will be available at the same port as well:
+## How profit is calculated
 
-- `http://localhost:8888/.netlify/functions/hello` and 
-- `http://localhost:8888/.netlify/functions/async-dadjoke`
-
-## Deployment
-
-During deployment, this project is configured, inside `netlify.toml` to run the build `command`: `yarn build`.
-
-`yarn build` corresponds to the npm script `build`, which uses `npm-run-all` (aka `run-p`) to concurrently run `"build:app"` (aka `react-scripts build`) and `build:lambda` (aka `netlify-lambda build src/lambda`).
-
-## Typescript
-
-<details>
-  <summary>
-    <b id="typescript">Click for instructions</b>
-  </summary>
-
-You can use Typescript in both your frontend React code (with `react-scripts` v2.1+) and your serverless functions (with `netlify-lambda` v1.1+). Follow these instructions:
-
-1. `yarn add -D typescript @types/node @types/react @types/react-dom @babel/preset-typescript @types/aws-lambda`
-2. convert `src/lambda/hello.js` to `src/lambda/hello.ts`
-3. use types in your event handler:
-
-```ts
-import { Handler, Context, Callback, APIGatewayEvent } from 'aws-lambda'
-
-interface HelloResponse {
-  statusCode: number
-  body: string
-}
-
-const handler: Handler = (event: APIGatewayEvent, context: Context, callback: Callback) => {
-  const params = event.queryStringParameters
-  const response: HelloResponse = {
-    statusCode: 200,
-    body: JSON.stringify({
-      msg: `Hello world ${Math.floor(Math.random() * 10)}`,
-      params,
-    }),
-  }
-
-  callback(undefined, response)
-}
-
-export { handler }
+```
+revenue      = items + postage charged − discounts − refunds   (sales tax excluded)
+fees         = platform fees from your Settings rates
+               (Etsy card fees use the actual figure from the CSV when present)
+cogs         = matched product costs + packaging + postage you pay
+gross profit = revenue − fees − cogs
+net profit   = gross profit − fixed monthly overheads
 ```
 
-rerun and see it work!
+## Where the data lives (important)
 
-You are free to set up your `tsconfig.json` and `tslint` as you see fit.
+All data — accounts, orders, costs, tasks — is stored **in the browser** (localStorage).
+That means:
 
-</details>
+- It works with zero hosting cost and nothing to maintain, but data is **per device**.
+- **Settings → Data → Export backup** regularly. The backup file restores everything, and it's
+  also how you share data with a teammate on another machine today.
 
-**If you want to try working in Typescript on the client and lambda side**: There are a bunch of small setup details to get right. Check https://github.com/sw-yx/create-react-app-lambda-typescript for a working starter.
+### Upgrade path to real multi-user sync
 
-## Routing and authentication with Netlify Identity
+When you're ready for the team to share live data across devices, the app's data layer is isolated
+in `src/lib/store.js` — swap localStorage for a hosted database and everything else works
+unchanged. The natural options from lightest to heaviest:
 
-For a full demo of routing and authentication, check this branch: https://github.com/netlify/create-react-app-lambda/pull/18 This example will not be maintained but may be helpful.
+1. **Supabase** (recommended): free tier covers this easily — Postgres + built-in auth replaces
+   `src/lib/auth.js` too.
+2. **Netlify Identity + Netlify Blobs/Functions** if you want to stay all-Netlify.
+3. A small custom API.
 
-## Service Worker
+## Code map
 
-`create-react-app`'s default service worker (in `src/index.js`) does not work with lambda functions out of the box. It prevents calling the function and returns the app itself instead ([Read more](https://github.com/facebook/create-react-app/issues/2237#issuecomment-302693219)). To solve this you have to eject and enhance the service worker configuration in the webpack config. Whitelist the path of your lambda function and you are good to go.
+```
+src/
+  App.js                    shell, sidebar navigation, auth gate
+  lib/
+    store.js                persistence, defaults, backup import/export
+    auth.js                 password hashing + login checks
+    csv.js                  CSV parser, Shopify/Etsy format detection, order merging
+    fees.js                 fee engine + product-cost matching
+    calc.js                 profit maths, monthly series, product/fee breakdowns
+    format.js               money/date formatting
+  components/
+    charts.js               hand-rolled SVG charts (bars, donut, h-bars) with tooltips
+    Dashboard.js  AnalyticsPage.js  OrdersPage.js  CostsPage.js
+    PricingPage.js  TasksPage.js  TeamPage.js  SettingsPage.js  Login.js
+```

@@ -1,70 +1,138 @@
-import React, { Component } from "react"
-import logo from "./logo.svg"
-import "./App.css"
+import React, { useEffect, useState } from "react";
+import { loadDb, saveDb, loadSession, saveSession } from "./lib/store";
+import { Login, FirstRunSetup } from "./components/Login";
+import Dashboard from "./components/Dashboard";
+import OrdersPage from "./components/OrdersPage";
+import CostsPage from "./components/CostsPage";
+import AnalyticsPage from "./components/AnalyticsPage";
+import PricingPage from "./components/PricingPage";
+import TasksPage from "./components/TasksPage";
+import TeamPage from "./components/TeamPage";
+import SettingsPage from "./components/SettingsPage";
 
-class LambdaDemo extends Component {
-  constructor(props) {
-    super(props)
-    this.state = { loading: false, msg: null }
-  }
+const logo = process.env.PUBLIC_URL + "/brand/logo-light@2x.png";
 
-  handleClick = api => e => {
-    e.preventDefault()
+const icons = {
+  dashboard: <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" />,
+  orders: <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-8 14H7v-2h4v2zm6-4H7v-2h10v2zm0-4H7V7h10v2z" />,
+  costs: <path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z" />,
+  analytics: <path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z" />,
+  pricing: <path d="M12.79 21 3 11.21v2c0 .53.21 1.04.59 1.41l7.79 7.79c.78.78 2.05.78 2.83 0l6.21-6.21c.78-.78.78-2.05 0-2.83L12.79 21zM11.38 17.41c.39.39.9.59 1.41.59.51 0 1.02-.2 1.41-.59l6.21-6.21c.78-.78.78-2.05 0-2.83L12.62.58C12.25.21 11.74 0 11.21 0H5c-1.1 0-2 .9-2 2v6.21c0 .53.21 1.04.59 1.41l7.79 7.79zM7.25 3a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5z" />,
+  tasks: <path d="M22 5.18 10.59 16.6l-4.24-4.24 1.41-1.41 2.83 2.83 10-10L22 5.18zM19.79 10.22c.13.57.21 1.17.21 1.78 0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8c1.58 0 3.04.46 4.28 1.25l1.44-1.44A9.9 9.9 0 0 0 12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10c0-1.19-.22-2.33-.6-3.39l-1.61 1.61z" />,
+  team: <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />,
+  settings: <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.61 3.61 0 0 1 8.4 12c0-1.98 1.62-3.6 3.6-3.6s3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />,
+};
 
-    this.setState({ loading: true })
-    fetch("/.netlify/functions/" + api)
-      .then(response => response.json())
-      .then(json => this.setState({ loading: false, msg: json.msg }))
-  }
-
-  render() {
-    const { loading, msg } = this.state
-
-    return (
-      <p>
-        <button onClick={this.handleClick("hello")}>{loading ? "Loading..." : "Call Lambda"}</button>
-        <button onClick={this.handleClick("async-dadjoke")}>{loading ? "Loading..." : "Call Async Lambda"}</button>
-        <br />
-        <span>{msg}</span>
-      </p>
-    )
-  }
-}
-
-class App extends Component {
-  render() {
-    return (
-      <div className="App">
-        <header className="App-header">
-          <img src={logo} className="App-logo" alt="logo" />
-          <p>
-            Edit <code>src/App.js</code> and save to reload.
-          </p>
-          <LambdaDemo />
-        </header>
-      </div>
-    )
-  }
-}
-
-export default App
-
-import React from 'react';
-import './App.css';
-import Plot from './Plot';
-
-function App() {
-  const plotData = {
-    title: 'My NFT Plot',
-    story: 'Once upon a time in a plot far, far away...'
-  };
-  const isOwner = true; // Set this value based on the user's ownership status of the plot
-
+function Icon({ name }) {
   return (
-    <div className="App">
-      <Plot plotData={plotData} isOwner={isOwner} />
-    </div>
+    <svg className="icon" viewBox="0 0 24 24" fill="currentColor">
+      {icons[name]}
+    </svg>
   );
 }
 
-export default App;
+const NAV = [
+  { section: "Overview" },
+  { key: "dashboard", label: "Dashboard", icon: "dashboard" },
+  { key: "analytics", label: "Analytics", icon: "analytics" },
+  { section: "Operations" },
+  { key: "orders", label: "Orders & imports", icon: "orders" },
+  { key: "costs", label: "Costs", icon: "costs" },
+  { key: "pricing", label: "Pricing calculator", icon: "pricing" },
+  { section: "Team" },
+  { key: "tasks", label: "Tasks", icon: "tasks" },
+  { key: "team", label: "Team", icon: "team" },
+  { section: "Admin" },
+  { key: "settings", label: "Settings", icon: "settings" },
+];
+
+export default function App() {
+  const [db, setDb] = useState(loadDb);
+  const [session, setSession] = useState(loadSession);
+  const [pageKey, setPageKey] = useState("dashboard");
+
+  useEffect(() => {
+    saveDb(db);
+  }, [db]);
+
+  const update = (fn) => setDb((prev) => fn(prev));
+
+  const user = session ? db.users.find((u) => u.id === session.userId) : null;
+
+  if (!db.users.length) {
+    return (
+      <FirstRunSetup
+        users={db.users}
+        onCreated={(owner) => {
+          update((d) => ({ ...d, users: [owner] }));
+          const s = { userId: owner.id, at: new Date().toISOString() };
+          saveSession(s);
+          setSession(s);
+        }}
+      />
+    );
+  }
+
+  if (!user) {
+    return (
+      <Login
+        users={db.users}
+        onLogin={(u) => {
+          const s = { userId: u.id, at: new Date().toISOString() };
+          saveSession(s);
+          setSession(s);
+        }}
+      />
+    );
+  }
+
+  const logout = () => {
+    saveSession(null);
+    setSession(null);
+  };
+
+  const pages = {
+    dashboard: <Dashboard db={db} user={user} go={setPageKey} />,
+    analytics: <AnalyticsPage db={db} />,
+    orders: <OrdersPage db={db} update={update} />,
+    costs: <CostsPage db={db} update={update} />,
+    pricing: <PricingPage db={db} />,
+    tasks: <TasksPage db={db} update={update} user={user} />,
+    team: <TeamPage db={db} update={update} user={user} />,
+    settings: <SettingsPage db={db} update={update} user={user} />,
+  };
+
+  return (
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <img src={logo} alt="KantoForge HQ" />
+        </div>
+        {NAV.map((item, i) =>
+          item.section ? (
+            <div className="nav-section" key={"s" + i}>{item.section}</div>
+          ) : (
+            <button
+              key={item.key}
+              className={"nav-item" + (pageKey === item.key ? " active" : "")}
+              onClick={() => setPageKey(item.key)}
+            >
+              <Icon name={item.icon} />
+              {item.label}
+            </button>
+          )
+        )}
+        <div className="me">
+          <div className="avatar">{user.name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}</div>
+          <div className="who">
+            <div className="name">{user.name}</div>
+            <div className="role">{user.role}</div>
+          </div>
+          <span className="spacer" />
+          <button className="btn small" onClick={logout} title="Log out">⎋</button>
+        </div>
+      </aside>
+      <main className="main">{pages[pageKey]}</main>
+    </div>
+  );
+}
