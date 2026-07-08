@@ -82,6 +82,12 @@ create table public.app_settings (
   updated_at timestamptz not null default now()
 );
 
+create table public.monthly_figures (
+  id text primary key, -- "YYYY-MM"
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 insert into public.app_settings (id, data) values (1, '{}'::jsonb);
 
 -- ---------------------------------------------------------------------------
@@ -94,6 +100,7 @@ alter table public.product_costs enable row level security;
 alter table public.fixed_costs enable row level security;
 alter table public.tasks enable row level security;
 alter table public.app_settings enable row level security;
+alter table public.monthly_figures enable row level security;
 
 create policy "team can read profiles" on public.profiles
   for select to authenticated using (true);
@@ -112,6 +119,8 @@ create policy "team full access" on public.tasks
   for all to authenticated using (true) with check (true);
 create policy "team full access" on public.app_settings
   for all to authenticated using (true) with check (true);
+create policy "team full access" on public.monthly_figures
+  for all to authenticated using (true) with check (true);
 
 -- ---------------------------------------------------------------------------
 -- Realtime: lets everyone's dashboard update live when a teammate changes data
@@ -122,4 +131,5 @@ alter publication supabase_realtime add table
   public.fixed_costs,
   public.tasks,
   public.app_settings,
+  public.monthly_figures,
   public.profiles;

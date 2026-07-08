@@ -27,6 +27,8 @@ export const DEFAULT_SETTINGS = {
   // months manually marked "no sales" on the import coverage grid,
   // keyed "YYYY-MM:platform"
   coverageMarks: {},
+  // profit split applied to monthly figures' net profit
+  partner: { label: "Alula", pct: 40 },
 };
 
 // Deep-merge saved settings over defaults so new settings fields added in
@@ -49,6 +51,7 @@ const TABLE_MAP = [
   ["productCosts", "product_costs"],
   ["fixedCosts", "fixed_costs"],
   ["tasks", "tasks"],
+  ["monthlyFigures", "monthly_figures"],
 ];
 
 const CHUNK = 400;
@@ -73,12 +76,25 @@ export async function fetchDb() {
     must(supabase.from("tasks").select("data")),
     must(supabase.from("app_settings").select("data").eq("id", 1).maybeSingle()),
   ]);
+  // monthly_figures was added later — tolerate the table not existing yet so
+  // the rest of the app keeps working; the page shows migration instructions.
+  let monthlyFigures = [];
+  let monthlyFiguresReady = true;
+  try {
+    const rows = await must(supabase.from("monthly_figures").select("data"));
+    monthlyFigures = rows.map((r) => r.data).sort((a, b) => (b.id || "").localeCompare(a.id || ""));
+  } catch (e) {
+    monthlyFiguresReady = false;
+  }
+
   return {
     users: profiles.map((p) => ({ id: p.id, name: p.name, email: p.email, role: p.role, createdAt: p.created_at })),
     orders: orders.map((r) => r.data),
     productCosts: productCosts.map((r) => r.data),
     fixedCosts: fixedCosts.map((r) => r.data),
     tasks: tasks.map((r) => r.data).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")),
+    monthlyFigures,
+    monthlyFiguresReady,
     settings: mergeSettings(settingsRow ? settingsRow.data : null),
   };
 }
