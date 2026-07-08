@@ -2,6 +2,12 @@
 // Supabase. Trigger it from the app ("Sync Shopify now") or via the nightly
 // Vercel cron configured in vercel.json.
 //
+// Large stores can't be fetched inside one function invocation (60s limit),
+// so the sync is RESUMABLE: it upserts page by page, saves a cursor in
+// app_settings, and returns { done: false } when it ran out of time budget.
+// The app keeps calling until { done: true }. First run backfills history
+// oldest-first; after that it's a quick incremental sync by updated_at.
+//
 // Required env vars (Vercel → Settings → Environment Variables):
 //   SHOPIFY_STORE_DOMAIN        e.g. kantoforge.myshopify.com
 //   SHOPIFY_ADMIN_TOKEN         Admin API access token from your custom app (shpat_…)
@@ -12,8 +18,8 @@
 const { createClient } = require("@supabase/supabase-js");
 
 const API_VERSION = "2024-10";
-const MAX_PAGES = 40; // 40 × 250 = 10k orders per run; reruns continue via lastSyncAt
-const OVERLAP_MS = 10 * 60 * 1000; // re-fetch a 10-minute overlap so nothing slips between runs
+const TIME_BUDGET_MS = 40 * 1000; // stop fetching well before Vercel's 60s limit
+const OVERLAP_MS = 10 * 60 * 1000; // incremental syncs re-fetch a 10-minute overlap
 
 function missingConfig() {
   const need = {
@@ -26,21 +32,15 @@ function missingConfig() {
 }
 
 function shopDomain() {
-  return (process.env.SHOPIFY_STORE_DOMAIN || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  return (process.env.SHOPIFY_STORE_DOMAIN || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchShopifyOrders(sinceIso) {
-  let url = `https://${shopDomain()}/admin/api/${API_VERSION}/orders.json?status=any&limit=250`;
-  if (sinceIso) url += `&updated_at_min=${encodeURIComponent(sinceIso)}`;
-  const all = [];
-  let retries = 0;
-  for (let page = 0; page < MAX_PAGES && url; page++) {
-    const resp = await fetch(url, { headers: { "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_TOKEN } });
-    if (resp.status === 429 && retries < 5) {
-      retries++;
-      page--;
+async function fetchPage(url) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const resp = await fetch(url, { headers: { "X-Shopify-Access-Token": (process.env.SHOPIFY_ADMIN_TOKEN || "").trim() } });
+    if (resp.status === 429) {
       await sleep(1500);
       continue;
     }
@@ -49,12 +49,11 @@ async function fetchShopifyOrders(sinceIso) {
       throw new Error(`Shopify API responded ${resp.status}: ${text}`);
     }
     const body = await resp.json();
-    all.push(...(body.orders || []));
     const link = resp.headers.get("link") || "";
     const next = link.match(/<([^>]+)>;\s*rel="next"/);
-    url = next ? next[1] : null;
+    return { orders: body.orders || [], nextUrl: next ? next[1] : null };
   }
-  return all;
+  throw new Error("Shopify API kept rate-limiting (429) — try again in a minute.");
 }
 
 // Map a Shopify Admin API order to the app's normalised order shape —
@@ -102,6 +101,70 @@ function mapOrder(o) {
   };
 }
 
+async function upsertOrders(supaAdmin, orders) {
+  for (let i = 0; i < orders.length; i += 400) {
+    const chunk = orders.slice(i, i + 400).map((order) => ({
+      id: order.id,
+      platform: "shopify",
+      order_date: order.date,
+      data: order,
+    }));
+    const { error } = await supaAdmin.from("orders").upsert(chunk);
+    if (error) throw new Error("Supabase upsert: " + error.message);
+  }
+}
+
+// One resumable sync step. Returns { fetched, done, mode }.
+async function runSync(supaAdmin) {
+  const { data: row, error: settingsErr } = await supaAdmin.from("app_settings").select("data").eq("id", 1).maybeSingle();
+  if (settingsErr) throw new Error("Supabase: " + settingsErr.message);
+  const settings = (row && row.data) || {};
+  const prev = settings.shopifySync || {};
+
+  const backfillDone = !!prev.backfillDone;
+  const mode = backfillDone ? "incremental" : "backfill";
+
+  let url = `https://${shopDomain()}/admin/api/${API_VERSION}/orders.json?status=any&limit=250`;
+  if (mode === "backfill") {
+    url += "&order=" + encodeURIComponent("created_at asc");
+    if (prev.backfillCursor) url += `&created_at_min=${encodeURIComponent(prev.backfillCursor)}`;
+  } else {
+    const since = new Date(new Date(prev.lastSyncAt).getTime() - OVERLAP_MS).toISOString();
+    url += `&updated_at_min=${encodeURIComponent(since)}`;
+  }
+
+  const started = Date.now();
+  let fetched = 0;
+  let cursor = prev.backfillCursor || null;
+
+  while (url && Date.now() - started < TIME_BUDGET_MS) {
+    const page = await fetchPage(url);
+    const usable = page.orders.filter((o) => !o.test);
+    await upsertOrders(supaAdmin, usable.map(mapOrder));
+    fetched += usable.length;
+    if (page.orders.length) {
+      const last = page.orders[page.orders.length - 1];
+      if (last.created_at) cursor = last.created_at;
+    }
+    url = page.nextUrl;
+  }
+
+  const done = !url;
+  const total = (prev.backfillFetched || 0) + (mode === "backfill" ? fetched : 0);
+  const shopifySync = done
+    ? {
+        backfillDone: true,
+        backfillFetched: mode === "backfill" ? total : prev.backfillFetched,
+        lastSyncAt: new Date().toISOString(),
+        lastFetched: fetched,
+        mode,
+      }
+    : { ...prev, backfillDone: false, backfillCursor: cursor, backfillFetched: total, mode };
+
+  await supaAdmin.from("app_settings").upsert({ id: 1, data: { ...settings, shopifySync } });
+  return { fetched, done, mode };
+}
+
 async function isAuthorized(req, supaAdmin) {
   const header = req.headers.authorization || "";
   const token = header.replace(/^Bearer\s+/i, "").trim();
@@ -127,39 +190,13 @@ module.exports = async (req, res) => {
       return res.status(401).json({ ok: false, error: "Not authorised — sign in and try again." });
     }
 
-    // Incremental sync from the last run (with overlap); full history first time.
-    const { data: row, error: settingsErr } = await supaAdmin.from("app_settings").select("data").eq("id", 1).maybeSingle();
-    if (settingsErr) throw new Error("Supabase: " + settingsErr.message);
-    const settings = (row && row.data) || {};
-    const lastSyncAt = settings.shopifySync && settings.shopifySync.lastSyncAt;
-    const since = lastSyncAt ? new Date(new Date(lastSyncAt).getTime() - OVERLAP_MS).toISOString() : null;
-
-    const raw = await fetchShopifyOrders(since);
-    const orders = raw.filter((o) => !o.test).map(mapOrder);
-
-    for (let i = 0; i < orders.length; i += 400) {
-      const chunk = orders.slice(i, i + 400).map((order) => ({
-        id: order.id,
-        platform: "shopify",
-        order_date: order.date,
-        data: order,
-      }));
-      const { error } = await supaAdmin.from("orders").upsert(chunk);
-      if (error) throw new Error("Supabase upsert: " + error.message);
-    }
-
-    const shopifySync = {
-      lastSyncAt: new Date().toISOString(),
-      lastFetched: orders.length,
-      mode: since ? "incremental" : "full",
-    };
-    await supaAdmin.from("app_settings").upsert({ id: 1, data: { ...settings, shopifySync } });
-
-    return res.status(200).json({ ok: true, fetched: orders.length, mode: shopifySync.mode, lastSyncAt: shopifySync.lastSyncAt });
+    const result = await runSync(supaAdmin);
+    return res.status(200).json({ ok: true, ...result });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message || String(e) });
   }
 };
 
 module.exports.mapOrder = mapOrder;
-module.exports.fetchShopifyOrders = fetchShopifyOrders;
+module.exports.runSync = runSync;
+module.exports.fetchPage = fetchPage;

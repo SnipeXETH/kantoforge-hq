@@ -18,24 +18,46 @@ function ShopifySyncCard({ db, refetch }) {
     try {
       const { data } = await supabase.auth.getSession();
       const token = data.session && data.session.access_token;
-      const resp = await fetch("/api/sync-shopify", {
-        method: "POST",
-        headers: { Authorization: "Bearer " + token },
-      });
-      let body;
-      try {
-        body = await resp.json();
-      } catch (e) {
-        throw new Error("Sync endpoint not reachable (" + resp.status + "). It runs on the Vercel deployment, not on local dev servers.");
-      }
-      if (!body.ok) {
-        if (body.missing && body.missing.length) {
-          setShowHelp(true);
-          throw new Error("Not configured yet — missing: " + body.missing.join(", ") + ". Setup steps below.");
+
+      // The server syncs in resumable ~40s chunks and saves its place after
+      // every page, so we keep calling until it reports done.
+      let total = 0;
+      let done = false;
+      let mode = "backfill";
+      let timeouts = 0;
+      for (let round = 0; round < 80 && !done; round++) {
+        const resp = await fetch("/api/sync-shopify", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + token },
+        });
+        let body = null;
+        try {
+          body = await resp.json();
+        } catch (e) {
+          body = null;
         }
-        throw new Error(body.error || "Sync failed.");
+        if (!body) {
+          // 504 = the chunk itself timed out; progress is saved, so retry.
+          if ((resp.status === 504 || resp.status === 502) && timeouts < 5) {
+            timeouts++;
+            setResult(`Still syncing — picking up where it left off (${total} orders so far)…`);
+            continue;
+          }
+          throw new Error("Sync endpoint not reachable (" + resp.status + "). It runs on the Vercel deployment, not on local dev servers.");
+        }
+        if (!body.ok) {
+          if (body.missing && body.missing.length) {
+            setShowHelp(true);
+            throw new Error("Not configured yet — missing: " + body.missing.join(", ") + ". Setup steps below.");
+          }
+          throw new Error(body.error || "Sync failed.");
+        }
+        total += body.fetched;
+        done = body.done !== false;
+        mode = body.mode || mode;
+        if (!done) setResult(`Syncing… ${total} orders so far, still going.`);
       }
-      setResult(`Pulled ${body.fetched} order${body.fetched === 1 ? "" : "s"} from Shopify (${body.mode === "full" ? "full history" : "changes since last sync"}).`);
+      setResult(`Pulled ${total} order${total === 1 ? "" : "s"} from Shopify (${mode === "backfill" ? "history backfill complete" : "changes since last sync"}).`);
       await refetch();
     } catch (e) {
       setError(e.message || String(e));
