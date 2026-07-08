@@ -173,7 +173,7 @@ export default function App() {
   const pages = {
     dashboard: <Dashboard db={db} user={user} go={setPageKey} />,
     analytics: <AnalyticsPage db={db} />,
-    orders: <OrdersPage db={db} update={update} />,
+    orders: <OrdersPage db={db} update={update} refetch={refetch} />,
     costs: <CostsPage db={db} update={update} />,
     pricing: <PricingPage db={db} />,
     tasks: <TasksPage db={db} update={update} user={user} />,
