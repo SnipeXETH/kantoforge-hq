@@ -1,8 +1,7 @@
-// Local data store for KantoForge HQ.
-// Everything persists to localStorage under one versioned key so it can be
-// exported/imported as a single backup file (Settings → Data).
-const KEY = "kf_data_v1";
-const SESSION_KEY = "kf_session_v1";
+// Data layer for KantoForge HQ, backed by Supabase.
+// The app holds the whole database in memory as `db` and re-renders from it;
+// `syncDb` diffs the previous and next states and pushes only what changed.
+import { supabase } from "./supabase";
 
 export const DEFAULT_SETTINGS = {
   currency: "GBP",
@@ -27,17 +26,6 @@ export const DEFAULT_SETTINGS = {
   },
 };
 
-function emptyDb() {
-  return {
-    users: [],
-    orders: [],
-    productCosts: [],
-    fixedCosts: [],
-    tasks: [],
-    settings: DEFAULT_SETTINGS,
-  };
-}
-
 // Deep-merge saved settings over defaults so new settings fields added in
 // future versions get sensible values for existing installs.
 function mergeSettings(saved) {
@@ -53,48 +41,114 @@ function mergeSettings(saved) {
   return out;
 }
 
-export function loadDb() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return emptyDb();
-    const parsed = JSON.parse(raw);
-    return { ...emptyDb(), ...parsed, settings: mergeSettings(parsed.settings) };
-  } catch (e) {
-    console.error("Failed to load data", e);
-    return emptyDb();
-  }
+const TABLE_MAP = [
+  ["orders", "orders"],
+  ["productCosts", "product_costs"],
+  ["fixedCosts", "fixed_costs"],
+  ["tasks", "tasks"],
+];
+
+const CHUNK = 400;
+
+function rowFor(table, item) {
+  if (table === "orders") return { id: item.id, platform: item.platform, order_date: item.date || null, data: item };
+  return { id: item.id, data: item };
 }
 
-export function saveDb(db) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(db));
-  } catch (e) {
-    console.error("Failed to save data", e);
-  }
+async function must(query) {
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return data;
 }
+
+export async function fetchDb() {
+  const [profiles, orders, productCosts, fixedCosts, tasks, settingsRow] = await Promise.all([
+    must(supabase.from("profiles").select("*").order("created_at", { ascending: true })),
+    must(supabase.from("orders").select("data").order("order_date", { ascending: false })),
+    must(supabase.from("product_costs").select("data")),
+    must(supabase.from("fixed_costs").select("data")),
+    must(supabase.from("tasks").select("data")),
+    must(supabase.from("app_settings").select("data").eq("id", 1).maybeSingle()),
+  ]);
+  return {
+    users: profiles.map((p) => ({ id: p.id, name: p.name, email: p.email, role: p.role, createdAt: p.created_at })),
+    orders: orders.map((r) => r.data),
+    productCosts: productCosts.map((r) => r.data),
+    fixedCosts: fixedCosts.map((r) => r.data),
+    tasks: tasks.map((r) => r.data).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")),
+    settings: mergeSettings(settingsRow ? settingsRow.data : null),
+  };
+}
+
+// Push the difference between two db states to Supabase. Slices that kept
+// their object identity are untouched; within a changed slice, items are
+// compared by reference and matched by id.
+export async function syncDb(prev, next) {
+  const jobs = [];
+  for (const [key, table] of TABLE_MAP) {
+    if (prev[key] === next[key]) continue;
+    const prevById = new Map(prev[key].map((x) => [x.id, x]));
+    const upserts = [];
+    const seen = new Set();
+    for (const item of next[key]) {
+      seen.add(item.id);
+      if (prevById.get(item.id) !== item) upserts.push(rowFor(table, item));
+    }
+    const deletes = prev[key].filter((x) => !seen.has(x.id)).map((x) => x.id);
+    for (let i = 0; i < upserts.length; i += CHUNK) {
+      jobs.push(must(supabase.from(table).upsert(upserts.slice(i, i + CHUNK))));
+    }
+    if (deletes.length) jobs.push(must(supabase.from(table).delete().in("id", deletes)));
+  }
+  if (prev.settings !== next.settings) {
+    jobs.push(must(supabase.from("app_settings").upsert({ id: 1, data: next.settings })));
+  }
+  if (prev.users !== next.users) {
+    const prevRole = new Map(prev.users.map((u) => [u.id, u.role]));
+    for (const u of next.users) {
+      if (prevRole.has(u.id) && prevRole.get(u.id) !== u.role) {
+        jobs.push(must(supabase.from("profiles").update({ role: u.role }).eq("id", u.id)));
+      }
+    }
+  }
+  await Promise.all(jobs);
+}
+
+// --- Backup / restore -------------------------------------------------------
 
 export function exportBackup(db) {
-  return JSON.stringify({ app: "kantoforge-hq", version: 1, exportedAt: new Date().toISOString(), data: db }, null, 2);
+  return JSON.stringify(
+    { app: "kantoforge-hq", version: 2, exportedAt: new Date().toISOString(), data: db },
+    null,
+    2
+  );
 }
 
 export function parseBackup(text) {
   const parsed = JSON.parse(text);
   const data = parsed && parsed.app === "kantoforge-hq" ? parsed.data : parsed;
-  if (!data || !Array.isArray(data.orders) || !Array.isArray(data.users)) {
+  if (!data || !Array.isArray(data.orders)) {
     throw new Error("This file doesn't look like a KantoForge HQ backup.");
   }
-  return { ...emptyDb(), ...data, settings: mergeSettings(data.settings) };
+  return data;
 }
 
-export function loadSession() {
-  try {
-    return JSON.parse(localStorage.getItem(SESSION_KEY));
-  } catch (e) {
-    return null;
+// Replace all business data with the backup's. Accounts are not restored —
+// they live in Supabase Auth, not in backups.
+export async function importBackup(data) {
+  await wipeData();
+  const jobs = [];
+  for (const [key, table] of TABLE_MAP) {
+    const rows = (data[key] || []).filter((x) => x && x.id).map((x) => rowFor(table, x));
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      jobs.push(must(supabase.from(table).upsert(rows.slice(i, i + CHUNK))));
+    }
   }
+  jobs.push(must(supabase.from("app_settings").upsert({ id: 1, data: mergeSettings(data.settings) })));
+  await Promise.all(jobs);
 }
 
-export function saveSession(session) {
-  if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  else localStorage.removeItem(SESSION_KEY);
+export async function wipeData() {
+  await Promise.all(TABLE_MAP.map(([, table]) => must(supabase.from(table).delete().neq("id", ""))));
+  await must(supabase.from("app_settings").upsert({ id: 1, data: {} }));
 }

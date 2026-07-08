@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { exportBackup, parseBackup } from "../lib/store";
+import { exportBackup, parseBackup, importBackup, wipeData } from "../lib/store";
 
 function RateField({ label, hint, value, onChange, suffix }) {
   return (
@@ -11,10 +11,11 @@ function RateField({ label, hint, value, onChange, suffix }) {
   );
 }
 
-export default function SettingsPage({ db, update, user }) {
+export default function SettingsPage({ db, update, user, refetch }) {
   const fileRef = useRef(null);
   const [msg, setMsg] = useState(null);
   const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
   const isAdmin = user.role === "admin";
   const currency = db.settings.currency;
 
@@ -36,19 +37,32 @@ export default function SettingsPage({ db, update, user }) {
     try {
       const text = await file.text();
       const data = parseBackup(text);
-      if (!window.confirm(`Replace everything with this backup? It has ${data.orders.length} orders, ${data.users.length} users and ${data.tasks.length} tasks.`)) return;
-      update(() => data);
-      setMsg("Backup restored.");
+      if (!window.confirm(`Replace all business data with this backup? It has ${data.orders.length} orders and ${(data.tasks || []).length} tasks. Team accounts are not affected.`)) return;
+      setBusy(true);
+      await importBackup(data);
+      await refetch();
+      setMsg("Backup restored for the whole team.");
     } catch (e) {
       setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
-  const wipe = () => {
-    if (!window.confirm("Delete ALL data — orders, costs, tasks and accounts? This can't be undone.")) return;
+  const wipe = async () => {
+    if (!window.confirm("Delete ALL business data — orders, costs, tasks — for the whole team? Accounts stay.")) return;
     if (!window.confirm("Really sure? Consider exporting a backup first.")) return;
-    localStorage.clear();
-    window.location.reload();
+    setErr(null);
+    setBusy(true);
+    try {
+      await wipeData();
+      await refetch();
+      setMsg("All business data deleted.");
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const e = db.settings.etsy;
@@ -112,14 +126,15 @@ export default function SettingsPage({ db, update, user }) {
       <div className="card mt">
         <h2>Data</h2>
         <div className="card-sub">
-          Everything is stored in this browser. Export regularly — it's your backup, and it's also how you share data with
-          teammates on other devices for now.
+          Data lives in your Supabase database and is shared live with the whole team. Backups are still a good habit —
+          export before big imports or cleanups.
         </div>
         <div className="row">
-          <button className="btn primary" onClick={doExport}>⬇ Export backup (.json)</button>
-          <button className="btn" onClick={() => fileRef.current && fileRef.current.click()}>⬆ Restore from backup</button>
-          {isAdmin && <button className="btn danger" onClick={wipe}>Delete all data</button>}
+          <button className="btn primary" onClick={doExport} disabled={busy}>⬇ Export backup (.json)</button>
+          {isAdmin && <button className="btn" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}>⬆ Restore from backup</button>}
+          {isAdmin && <button className="btn danger" onClick={wipe} disabled={busy}>Delete all business data</button>}
           <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: "none" }} onChange={(ev) => { if (ev.target.files[0]) doImport(ev.target.files[0]); ev.target.value = ""; }} />
+          {busy && <span className="muted small">Working…</span>}
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
-import { loadDb, saveDb, loadSession, saveSession } from "./lib/store";
-import { Login, FirstRunSetup } from "./components/Login";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { supabase, isConfigured } from "./lib/supabase";
+import { fetchDb, syncDb } from "./lib/store";
+import { Login, SetNewPassword, AuthCard } from "./components/Login";
 import Dashboard from "./components/Dashboard";
 import OrdersPage from "./components/OrdersPage";
 import CostsPage from "./components/CostsPage";
@@ -46,50 +47,128 @@ const NAV = [
   { key: "settings", label: "Settings", icon: "settings" },
 ];
 
+function CenterScreen({ children }) {
+  return (
+    <div className="login-wrap">
+      <div style={{ textAlign: "center" }}>
+        <img src={logo} alt="KantoForge" style={{ height: 24, marginBottom: 18, opacity: 0.9 }} />
+        <div className="muted">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function NotConfigured() {
+  return (
+    <AuthCard tag="Almost there — connect Supabase to finish setup.">
+      <div className="notice" style={{ textAlign: "left" }}>
+        <p style={{ marginTop: 0 }}>This deployment is missing its database configuration. Add these environment variables and redeploy:</p>
+        <p style={{ fontFamily: "monospace", fontSize: 12 }}>
+          REACT_APP_SUPABASE_URL<br />
+          REACT_APP_SUPABASE_ANON_KEY
+        </p>
+        <p style={{ marginBottom: 0 }}>
+          Both values are in your Supabase project under <b>Settings → API</b>. Full instructions are in the repo's README.
+        </p>
+      </div>
+    </AuthCard>
+  );
+}
+
 export default function App() {
-  const [db, setDb] = useState(loadDb);
-  const [session, setSession] = useState(loadSession);
+  const [session, setSession] = useState(undefined); // undefined = still checking
+  const [recovery, setRecovery] = useState(false);
+  const [db, setDbState] = useState(null);
+  const dbRef = useRef(null);
+  const [loadErr, setLoadErr] = useState(null);
+  const [syncErr, setSyncErr] = useState(null);
   const [pageKey, setPageKey] = useState("dashboard");
 
   useEffect(() => {
-    saveDb(db);
-  }, [db]);
+    if (!isConfigured) return;
+    supabase.auth.getSession().then(({ data }) => setSession(data.session || null));
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === "PASSWORD_RECOVERY") setRecovery(true);
+      setSession(s || null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
-  const update = (fn) => setDb((prev) => fn(prev));
+  const refetch = useCallback(async () => {
+    try {
+      const fresh = await fetchDb();
+      dbRef.current = fresh;
+      setDbState(fresh);
+      setLoadErr(null);
+    } catch (e) {
+      setLoadErr(e.message || String(e));
+    }
+  }, []);
 
-  const user = session ? db.users.find((u) => u.id === session.userId) : null;
+  useEffect(() => {
+    if (session) {
+      refetch();
+    } else {
+      dbRef.current = null;
+      setDbState(null);
+    }
+  }, [session, refetch]);
 
-  if (!db.users.length) {
+  // Live sync: when a teammate changes anything, refetch (debounced).
+  useEffect(() => {
+    if (!session) return;
+    let timer;
+    const channel = supabase
+      .channel("kf-live")
+      .on("postgres_changes", { event: "*", schema: "public" }, () => {
+        clearTimeout(timer);
+        timer = setTimeout(refetch, 800);
+      })
+      .subscribe();
+    return () => {
+      clearTimeout(timer);
+      supabase.removeChannel(channel);
+    };
+  }, [session, refetch]);
+
+  // Optimistic update: apply locally right away, push the diff to Supabase.
+  const update = useCallback((fn) => {
+    const prev = dbRef.current;
+    if (!prev) return;
+    const next = fn(prev);
+    dbRef.current = next;
+    setDbState(next);
+    syncDb(prev, next).catch((e) => setSyncErr(e.message || String(e)));
+  }, []);
+
+  if (!isConfigured) return <NotConfigured />;
+  if (recovery && session) return <SetNewPassword onDone={() => setRecovery(false)} />;
+  if (session === undefined) return <CenterScreen>Loading…</CenterScreen>;
+  if (!session) return <Login />;
+  if (loadErr) {
     return (
-      <FirstRunSetup
-        users={db.users}
-        onCreated={(owner) => {
-          update((d) => ({ ...d, users: [owner] }));
-          const s = { userId: owner.id, at: new Date().toISOString() };
-          saveSession(s);
-          setSession(s);
-        }}
-      />
+      <AuthCard tag="Couldn't load your data.">
+        <div className="err">{loadErr}</div>
+        <p className="muted small">
+          If this is a brand-new Supabase project, make sure you've run <b>supabase/schema.sql</b> in the SQL editor.
+        </p>
+        <button className="btn primary" style={{ width: "100%", justifyContent: "center" }} onClick={refetch}>Retry</button>
+      </AuthCard>
     );
   }
+  if (!db) return <CenterScreen>Loading your workspace…</CenterScreen>;
 
+  const user = db.users.find((u) => u.id === session.user.id);
   if (!user) {
     return (
-      <Login
-        users={db.users}
-        onLogin={(u) => {
-          const s = { userId: u.id, at: new Date().toISOString() };
-          saveSession(s);
-          setSession(s);
-        }}
-      />
+      <AuthCard tag="Setting up your profile…">
+        <p className="muted small">Your account exists but its profile row hasn't appeared yet. This resolves itself in a second.</p>
+        <button className="btn primary" style={{ width: "100%", justifyContent: "center" }} onClick={refetch}>Retry</button>
+      </AuthCard>
     );
   }
 
-  const logout = () => {
-    saveSession(null);
-    setSession(null);
-  };
+  const logout = () => supabase.auth.signOut();
 
   const pages = {
     dashboard: <Dashboard db={db} user={user} go={setPageKey} />,
@@ -99,7 +178,7 @@ export default function App() {
     pricing: <PricingPage db={db} />,
     tasks: <TasksPage db={db} update={update} user={user} />,
     team: <TeamPage db={db} update={update} user={user} />,
-    settings: <SettingsPage db={db} update={update} user={user} />,
+    settings: <SettingsPage db={db} update={update} user={user} refetch={refetch} />,
   };
 
   return (
@@ -123,7 +202,7 @@ export default function App() {
           )
         )}
         <div className="me">
-          <div className="avatar">{user.name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}</div>
+          <div className="avatar">{(user.name || "?").split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}</div>
           <div className="who">
             <div className="name">{user.name}</div>
             <div className="role">{user.role}</div>
@@ -132,7 +211,18 @@ export default function App() {
           <button className="btn small" onClick={logout} title="Log out">⎋</button>
         </div>
       </aside>
-      <main className="main">{pages[pageKey]}</main>
+      <main className="main">
+        {syncErr && (
+          <div className="notice bad mb" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <span>⚠️ A change failed to save: {syncErr}</span>
+            <span className="row">
+              <button className="btn small" onClick={() => { setSyncErr(null); refetch(); }}>Reload data</button>
+              <button className="btn small" onClick={() => setSyncErr(null)}>Dismiss</button>
+            </span>
+          </div>
+        )}
+        {pages[pageKey]}
+      </main>
     </div>
   );
 }

@@ -49,25 +49,45 @@ gross profit = revenue − fees − cogs
 net profit   = gross profit − fixed monthly overheads
 ```
 
-## Where the data lives (important)
+## Deploying (GitHub → Supabase → Vercel)
 
-All data — accounts, orders, costs, tasks — is stored **in the browser** (localStorage).
-That means:
+Data lives in **Supabase** (Postgres + auth) and the whole team shares it live —
+dashboards update in realtime when a teammate imports orders or moves a task.
 
-- It works with zero hosting cost and nothing to maintain, but data is **per device**.
-- **Settings → Data → Export backup** regularly. The backup file restores everything, and it's
-  also how you share data with a teammate on another machine today.
+### 1. Supabase
 
-### Upgrade path to real multi-user sync
+1. Create a project at [supabase.com](https://supabase.com) (free tier is plenty).
+2. In the project: **SQL Editor → New query**, paste the whole of
+   [`supabase/schema.sql`](supabase/schema.sql), **Run**.
+3. **Authentication → Sign In / Providers → Email**: for the smoothest start, turn **off**
+   "Confirm email" (you can re-enable later).
+4. **Settings → API**: copy the **Project URL** and the **anon public** key.
 
-When you're ready for the team to share live data across devices, the app's data layer is isolated
-in `src/lib/store.js` — swap localStorage for a hosted database and everything else works
-unchanged. The natural options from lightest to heaviest:
+### 2. Vercel
 
-1. **Supabase** (recommended): free tier covers this easily — Postgres + built-in auth replaces
-   `src/lib/auth.js` too.
-2. **Netlify Identity + Netlify Blobs/Functions** if you want to stay all-Netlify.
-3. A small custom API.
+1. [vercel.com](https://vercel.com) → **Add New → Project** → import this GitHub repo.
+2. Framework preset: **Create React App** (auto-detected). No build settings to change.
+3. Under **Environment Variables** add:
+   - `REACT_APP_SUPABASE_URL` = your Project URL
+   - `REACT_APP_SUPABASE_ANON_KEY` = your anon public key
+4. **Deploy.** Every push to the production branch redeploys automatically.
+
+### 3. First run
+
+1. Open the deployed URL → **Create account**. The first account becomes the **admin**.
+2. Colleagues use the same URL → Create account → they appear on the Team page as members.
+3. Once the team is in, consider turning **off** "Allow new users to sign up" in Supabase
+   (Authentication → Sign In / Providers) so strangers can't join your workspace.
+
+Local development: copy `.env.example` to `.env.local`, fill in the two values, `yarn start`.
+
+### Security model
+
+- The anon key is public by design; **Row Level Security** does the protecting: only
+  signed-in users can touch data, and only admins can change other people's roles.
+- Anyone who signs up becomes a member with full business-data access — that's why you
+  disable public signups after onboarding, or invite via the Supabase dashboard
+  (Authentication → Users → Invite).
 
 ## Code map
 
