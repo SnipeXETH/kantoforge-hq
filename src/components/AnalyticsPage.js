@@ -9,7 +9,7 @@ export default function AnalyticsPage({ db }) {
   const [productSort, setProductSort] = useState("revenue");
   const currency = db.settings.currency;
 
-  const { t, months, products, fees, pnl } = useMemo(() => {
+  const { t, months, products, fees, pnl, behaviour } = useMemo(() => {
     const enriched = filterByRange(enrichAll(db.orders, db.settings, db.productCosts), range);
     const t = totals(enriched);
     const months = monthlySeries(enriched).slice(-12);
@@ -19,7 +19,31 @@ export default function AnalyticsPage({ db }) {
     const fixedMonthly = db.fixedCosts.reduce((s, c) => s + c.monthly, 0);
     const fixed = fixedMonthly * nMonths;
     const pnl = { nMonths, fixed, net: t.profit - fixed };
-    return { t, months, products, fees, pnl };
+
+    // Customer & behaviour metrics — need nothing but the orders themselves
+    const byBuyer = new Map();
+    let discounted = 0;
+    let refunded = 0;
+    let refundedOrders = 0;
+    for (const o of enriched) {
+      const key = (o.email || o.buyer || "").trim().toLowerCase();
+      if (key) byBuyer.set(key, (byBuyer.get(key) || 0) + 1);
+      if ((o.rawDiscount || o.discount || 0) > 0) discounted++;
+      if ((o.refunded || 0) > 0) {
+        refunded += o.refunded;
+        refundedOrders++;
+      }
+    }
+    const buyers = byBuyer.size;
+    const returning = Array.from(byBuyer.values()).filter((n) => n > 1).length;
+    const behaviour = {
+      buyers,
+      returningPct: buyers ? (returning / buyers) * 100 : null,
+      discountedPct: enriched.length ? (discounted / enriched.length) * 100 : null,
+      refunded,
+      refundedPct: enriched.length ? (refundedOrders / enriched.length) * 100 : null,
+    };
+    return { t, months, products, fees, pnl, behaviour };
   }, [db, range]);
 
   const sortedProducts = useMemo(() => {
@@ -57,27 +81,50 @@ export default function AnalyticsPage({ db }) {
         </div>
       </div>
 
+      <div className="grid kpis mt">
+        <div className="kpi">
+          <div className="label">Unique customers</div>
+          <div className="value">{behaviour.buyers}</div>
+          <div className="delta">{t.orders} orders in range</div>
+        </div>
+        <div className="kpi">
+          <div className="label">Returning customers</div>
+          <div className="value">{pct(behaviour.returningPct)}</div>
+          <div className="delta">bought more than once</div>
+        </div>
+        <div className="kpi">
+          <div className="label">Orders with a discount</div>
+          <div className="value">{pct(behaviour.discountedPct)}</div>
+          <div className="delta">coupon or sale price used</div>
+        </div>
+        <div className="kpi">
+          <div className="label">Refunded</div>
+          <div className="value">{money(behaviour.refunded, currency)}</div>
+          <div className="delta">{pct(behaviour.refundedPct)} of orders had a refund</div>
+        </div>
+      </div>
+
       <div className="card mt">
-        <h2>Monthly revenue by platform</h2>
+        <h2>Monthly revenue by channel</h2>
         <div className="card-sub">Is one channel carrying the business?</div>
         <GroupedBars
           currency={currency}
           data={months.map((m) => ({ label: monthLabel(m.month), values: [m.shopifyRevenue, m.etsyRevenue] }))}
           series={[
-            { label: "Shopify", color: "var(--c-shopify)" },
+            { label: "Website", color: "var(--c-shopify)" },
             { label: "Etsy", color: "var(--c-etsy)" },
           ]}
         />
       </div>
 
       <div className="card mt">
-        <h2>Monthly profit by platform</h2>
+        <h2>Monthly profit by channel</h2>
         <div className="card-sub">Same months, after fees and costs. Bars below the line are loss-making months.</div>
         <GroupedBars
           currency={currency}
           data={months.map((m) => ({ label: monthLabel(m.month), values: [m.shopifyProfit, m.etsyProfit] }))}
           series={[
-            { label: "Shopify", color: "var(--c-shopify)" },
+            { label: "Website", color: "var(--c-shopify)" },
             { label: "Etsy", color: "var(--c-etsy)" },
           ]}
         />

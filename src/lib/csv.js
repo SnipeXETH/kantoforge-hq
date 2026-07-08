@@ -119,11 +119,15 @@ function parseShopifyOrders(objects) {
         refunded: 0,
         feesActual: null,
         buyer: row["Billing Name"] || row["Shipping Name"] || "",
+        email: row["Email"] || "",
         status: (row["Financial Status"] || "").toLowerCase(),
+        tags: "",
         items: [],
       };
       orders.set(name, order);
     }
+    if (row["Tags"]) order.tags = row["Tags"];
+    if (row["Email"] && !order.email) order.email = row["Email"];
     // Order-level money fields only appear on the first row of each order
     if (row["Total"] !== "" && row["Total"] != null) {
       order.itemsTotal = num(row["Subtotal"]);
@@ -148,7 +152,20 @@ function parseShopifyOrders(objects) {
   }
   // Shopify Subtotal is already discount-inclusive, so zero the discount to
   // avoid double-counting it in revenue maths downstream.
-  return Array.from(orders.values()).map((o) => ({ ...o, itemsTotal: o.itemsTotal, discount: 0, rawDiscount: o.discount }));
+  // Orders the Etsy integration pushed into Shopify carry an "Etsy" tag —
+  // those belong to the Etsy channel (and Etsy's fee model).
+  return Array.from(orders.values()).map((o) => ({
+    ...o,
+    platform: isEtsyTagged(o.tags) ? "etsy" : "shopify",
+    channelVia: "shopify",
+    itemsTotal: o.itemsTotal,
+    discount: 0,
+    rawDiscount: o.discount,
+  }));
+}
+
+export function isEtsyTagged(tags) {
+  return /(^|,)\s*etsy\s*(,|$)/i.test(tags || "");
 }
 
 function parseEtsyOrders(objects) {

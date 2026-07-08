@@ -72,7 +72,8 @@ function ShopifySyncCard({ db, refetch }) {
         <div>
           <h2><span className="badge shopify">Shopify</span> automatic sync</h2>
           <div className="card-sub" style={{ marginBottom: 0 }}>
-            Pulls orders straight from Shopify — no CSVs needed. Also runs automatically every night at 3am.
+            Pulls every order straight from Shopify — website sales and Etsy orders alike (the “Etsy” tag sorts them
+            into channels). No CSVs needed. Also runs automatically every night at 3am.
             {sync && sync.lastSyncAt ? <> Last sync: <b>{new Date(sync.lastSyncAt).toLocaleString("en-GB")}</b> ({sync.lastFetched} orders).</> : " Never synced yet."}
           </div>
         </div>
@@ -108,14 +109,10 @@ function ShopifySyncCard({ db, refetch }) {
 
 const PAGE_SIZE = 50;
 
-// --- CSV coverage grid -------------------------------------------------------
+// --- order-data coverage grid ------------------------------------------------
 const COVERAGE_START_YEAR = 2021;
 const MONTH_LETTERS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const PLATFORMS = [
-  ["shopify", "Shopify"],
-  ["etsy", "Etsy"],
-];
 
 function CoverageCard({ db, update }) {
   const marks = db.settings.coverageMarks || {};
@@ -125,8 +122,7 @@ function CoverageCard({ db, update }) {
     for (const o of db.orders) {
       const k = o.date ? monthKey(o.date) : null;
       if (!k) continue;
-      const key = k + ":" + o.platform;
-      m.set(key, (m.get(key) || 0) + 1);
+      m.set(k, (m.get(k) || 0) + 1);
     }
     return m;
   }, [db.orders]);
@@ -136,16 +132,14 @@ function CoverageCard({ db, update }) {
   const years = [];
   for (let y = now.getFullYear(); y >= COVERAGE_START_YEAR; y--) years.push(y);
 
-  const missing = { shopify: 0, etsy: 0 };
+  let missing = 0;
   for (let idx = COVERAGE_START_YEAR * 12; idx <= curIdx; idx++) {
     const mk = Math.floor(idx / 12) + "-" + String((idx % 12) + 1).padStart(2, "0");
-    for (const [p] of PLATFORMS) {
-      if (!counts.get(mk + ":" + p) && !marks[mk + ":" + p]) missing[p]++;
-    }
+    if (!counts.get(mk) && !marks[mk + ":any"]) missing++;
   }
 
-  const toggleMark = (mk, platform) => {
-    const key = mk + ":" + platform;
+  const toggleMark = (mk) => {
+    const key = mk + ":any";
     update((d) => {
       const cm = { ...(d.settings.coverageMarks || {}) };
       if (cm[key]) delete cm[key];
@@ -156,14 +150,15 @@ function CoverageCard({ db, update }) {
 
   return (
     <div className="card mt">
-      <h2>CSV coverage by month</h2>
+      <h2>Order data by month</h2>
       <div className="card-sub">
-        Which months have order data, all the way back to {COVERAGE_START_YEAR}. Red dashed months have nothing imported yet —
-        if a month genuinely had no sales, click it to mark it “no sales” (click again to unmark).
+        Which months have orders loaded, back to {COVERAGE_START_YEAR}. Red dashed months have nothing yet — if a month
+        genuinely had no sales, click it to mark it “no sales” (click again to unmark).
       </div>
       <div className="row mb">
-        <span className="badge shopify">Shopify — {missing.shopify === 0 ? "complete ✓" : missing.shopify + " month" + (missing.shopify === 1 ? "" : "s") + " missing"}</span>
-        <span className="badge etsy">Etsy — {missing.etsy === 0 ? "complete ✓" : missing.etsy + " month" + (missing.etsy === 1 ? "" : "s") + " missing"}</span>
+        <span className={"badge " + (missing === 0 ? "green" : "yellow")}>
+          {missing === 0 ? "Complete ✓ — every month covered" : missing + " month" + (missing === 1 ? "" : "s") + " missing"}
+        </span>
       </div>
       <div className="table-wrap">
         <div className="cov-grid">
@@ -171,41 +166,33 @@ function CoverageCard({ db, update }) {
             <div className="cov-year" key={y}>
               <div className="cov-label">
                 <div>{y}</div>
-                {PLATFORMS.map(([p, label]) => (
-                  <span key={p} className="dot" style={{ background: p === "shopify" ? "var(--c-shopify)" : "var(--c-etsy)" }} title={label} />
-                ))}
               </div>
               <div className="cov-months">
                 {MONTH_LETTERS.map((letter, m) => {
                   const mk = y + "-" + String(m + 1).padStart(2, "0");
                   const future = y * 12 + m > curIdx;
+                  const count = counts.get(mk) || 0;
+                  const marked = !!marks[mk + ":any"];
+                  const cls = future ? "future" : count ? "covered shopify" : marked ? "marked" : "missing";
+                  const title = future
+                    ? MONTH_NAMES[m] + " " + y + " — in the future"
+                    : count
+                    ? `${MONTH_NAMES[m]} ${y} — ${count} order${count === 1 ? "" : "s"} loaded`
+                    : marked
+                    ? `${MONTH_NAMES[m]} ${y} — marked as no sales (click to unmark)`
+                    : `${MONTH_NAMES[m]} ${y} — no order data yet (click to mark as no sales)`;
                   return (
                     <div className="cov-col" key={m}>
                       <div className="cov-head">{letter}</div>
-                      {PLATFORMS.map(([p, label]) => {
-                        const count = counts.get(mk + ":" + p) || 0;
-                        const marked = !!marks[mk + ":" + p];
-                        const cls = future ? "future" : count ? "covered " + p : marked ? "marked" : "missing";
-                        const title = future
-                          ? MONTH_NAMES[m] + " " + y + " — in the future"
-                          : count
-                          ? `${MONTH_NAMES[m]} ${y} — ${label}: ${count} order${count === 1 ? "" : "s"} imported`
-                          : marked
-                          ? `${MONTH_NAMES[m]} ${y} — ${label}: marked as no sales (click to unmark)`
-                          : `${MONTH_NAMES[m]} ${y} — ${label}: no CSV data yet (click to mark as no sales)`;
-                        return (
-                          <button
-                            key={p}
-                            type="button"
-                            className={"cov-cell " + cls}
-                            title={title}
-                            disabled={future || count > 0}
-                            onClick={() => toggleMark(mk, p)}
-                          >
-                            {future ? "" : count ? "✓" : marked ? "–" : "!"}
-                          </button>
-                        );
-                      })}
+                      <button
+                        type="button"
+                        className={"cov-cell " + cls}
+                        title={title}
+                        disabled={future || count > 0}
+                        onClick={() => toggleMark(mk)}
+                      >
+                        {future ? "" : count ? "✓" : marked ? "–" : "!"}
+                      </button>
                     </div>
                   );
                 })}
@@ -215,7 +202,7 @@ function CoverageCard({ db, update }) {
         </div>
       </div>
       <div className="legend">
-        <span className="li"><span className="cov-cell covered shopify" style={{ width: 18 }}>✓</span> imported</span>
+        <span className="li"><span className="cov-cell covered shopify" style={{ width: 18 }}>✓</span> loaded</span>
         <span className="li"><span className="cov-cell missing" style={{ width: 18 }}>!</span> missing</span>
         <span className="li"><span className="cov-cell marked" style={{ width: 18 }}>–</span> marked no sales</span>
       </div>
@@ -256,13 +243,25 @@ export default function OrdersPage({ db, update, refetch }) {
     setResult(null);
     const summaries = [];
     let orders = db.orders;
+    // Etsy orders from the cutover date onwards already live in Shopify —
+    // drop them from Etsy CSV imports so the same sale isn't counted twice.
+    const cutover = db.settings.etsyCutover ? new Date(db.settings.etsyCutover).toISOString() : null;
     try {
       for (const file of Array.from(files)) {
         const text = await file.text();
-        const { format, orders: incoming } = importCsvText(text);
+        const { format, orders: parsed } = importCsvText(text);
+        let incoming = parsed;
+        let skipped = 0;
+        if (cutover && format.startsWith("etsy")) {
+          incoming = parsed.filter((o) => !o.date || o.date < cutover);
+          skipped = parsed.length - incoming.length;
+        }
         const merged = mergeOrders(orders, incoming);
         orders = merged.orders;
-        summaries.push(`${file.name}: ${FORMAT_LABELS[format]} — ${merged.added} new, ${merged.updated} updated`);
+        summaries.push(
+          `${file.name}: ${FORMAT_LABELS[format]} — ${merged.added} new, ${merged.updated} updated` +
+            (skipped ? ` (${skipped} skipped: on/after ${shortDate(cutover)} they come from Shopify instead)` : "")
+        );
       }
       update((d) => ({ ...d, orders }));
       setResult(summaries);
@@ -280,22 +279,28 @@ export default function OrdersPage({ db, update, refetch }) {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>Orders &amp; imports</h1>
-          <div className="sub">Upload CSV exports from Shopify and Etsy — duplicates are merged automatically, so re-importing is safe.</div>
+          <h1>Orders</h1>
+          <div className="sub">
+            Everything flows from Shopify — website sales and Etsy orders (tagged “Etsy”) alike. Re-syncing and
+            re-importing are always safe: orders merge by number, never duplicate.
+          </div>
         </div>
       </div>
 
+      <ShopifySyncCard db={db} refetch={refetch} />
+
       <div
-        className={"dropzone" + (drag ? " over" : "")}
+        className={"dropzone mt" + (drag ? " over" : "")}
         onClick={() => fileRef.current && fileRef.current.click()}
         onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
         onDragLeave={() => setDrag(false)}
         onDrop={(e) => { e.preventDefault(); setDrag(false); handleFiles(e.dataTransfer.files); }}
       >
-        <div className="big">Drop CSV files here, or click to browse</div>
+        <div className="big">Or drop CSV files here (as many as you like)</div>
         <div className="small">
-          Shopify: Admin → Orders → Export. &nbsp; Etsy: Shop Manager → Settings → Options → Download Data
-          (both the <b>Orders</b> and <b>Order Items</b> files — import both for full detail).
+          Shopify exports (Admin → Orders → Export) work as an alternative to the sync above.
+          Etsy CSVs are only needed for history before <b>{shortDate(db.settings.etsyCutover)}</b> (when Etsy orders
+          started flowing into Shopify) — anything newer in them is skipped automatically.
         </div>
         <input
           ref={fileRef}
@@ -306,8 +311,6 @@ export default function OrdersPage({ db, update, refetch }) {
           onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
         />
       </div>
-
-      <ShopifySyncCard db={db} refetch={refetch} />
 
       <CoverageCard db={db} update={update} />
 
@@ -326,7 +329,7 @@ export default function OrdersPage({ db, update, refetch }) {
           <h2 style={{ margin: 0 }}>{filtered.length} orders</h2>
           <div className="toolbar">
             <div className="pills">
-              {[["all", "All"], ["shopify", "Shopify"], ["etsy", "Etsy"]].map(([k, l]) => (
+              {[["all", "All"], ["shopify", "Website"], ["etsy", "Etsy"]].map(([k, l]) => (
                 <button key={k} className={platform === k ? "active" : ""} onClick={() => { setPlatform(k); setPage(0); }}>{l}</button>
               ))}
             </div>
@@ -345,7 +348,7 @@ export default function OrdersPage({ db, update, refetch }) {
               <tr>
                 <th>Date</th>
                 <th>Order</th>
-                <th>Platform</th>
+                <th>Channel</th>
                 <th>Items</th>
                 <th className="num">Revenue</th>
                 <th className="num">Fees</th>
@@ -362,7 +365,7 @@ export default function OrdersPage({ db, update, refetch }) {
                     <b>{o.orderId}</b>
                     {o.buyer ? <div className="muted small">{o.buyer}</div> : null}
                   </td>
-                  <td><span className={"badge " + o.platform}>{o.platform === "shopify" ? "Shopify" : "Etsy"}</span></td>
+                  <td><span className={"badge " + o.platform}>{o.platform === "shopify" ? "Website" : "Etsy"}</span></td>
                   <td style={{ maxWidth: 320 }}>
                     {o.items.length
                       ? o.items.map((it, i) => (

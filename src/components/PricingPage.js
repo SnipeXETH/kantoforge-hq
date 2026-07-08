@@ -74,7 +74,7 @@ export default function PricingPage({ db }) {
           <label className="field">
             <span className="lab">Platform</span>
             <div className="pills">
-              {[["etsy", "Etsy"], ["shopify", "Shopify"]].map(([k, l]) => (
+              {[["etsy", "Etsy"], ["shopify", "Website"]].map(([k, l]) => (
                 <button key={k} type="button" className={platform === k ? "active" : ""} onClick={() => {
                   setPlatform(k);
                   setPostage(String(k === "etsy" ? db.settings.defaults.postagePerOrderEtsy : db.settings.defaults.postagePerOrderShopify));
@@ -110,7 +110,7 @@ export default function PricingPage({ db }) {
 
         <div className="card" style={{ margin: 0 }}>
           <h2>Result</h2>
-          <div className="card-sub">At {money(n(price), currency)} on {platform === "etsy" ? "Etsy" : "Shopify"}.</div>
+          <div className="card-sub">At {money(n(price), currency)} on {platform === "etsy" ? "Etsy" : "your website"}.</div>
           <div className="grid kpis" style={{ gridTemplateColumns: "1fr 1fr" }}>
             <div className="kpi" style={{ background: "var(--panel-2)" }}>
               <div className="label">Profit per sale</div>
@@ -147,7 +147,7 @@ export default function PricingPage({ db }) {
             {targetPrice ? (
               <span>
                 → list at <b style={{ fontSize: 18, color: "#34c759" }}>{money(targetPrice, currency)}</b>{" "}
-                <span className="muted">to make {pct(n(targetMargin))} on {platform === "etsy" ? "Etsy" : "Shopify"} with these costs</span>
+                <span className="muted">to make {pct(n(targetMargin))} on {platform === "etsy" ? "Etsy" : "your website"} with these costs</span>
               </span>
             ) : (
               <span className="muted">No realistic price hits that margin with these costs.</span>

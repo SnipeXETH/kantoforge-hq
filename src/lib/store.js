@@ -29,6 +29,10 @@ export const DEFAULT_SETTINGS = {
   coverageMarks: {},
   // profit split applied to monthly figures' net profit
   partner: { label: "Alula", pct: 40 },
+  // date the Etsy→Shopify integration went live: Etsy orders from this day
+  // onwards exist in Shopify, so Etsy CSV imports only accept earlier orders
+  // (prevents the same sale being counted twice)
+  etsyCutover: "2024-11-16",
 };
 
 // Deep-merge saved settings over defaults so new settings fields added in
