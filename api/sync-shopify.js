@@ -121,6 +121,21 @@ async function upsertOrders(supaAdmin, orders) {
   }
 }
 
+// Total order count as Shopify sees it — the truth-check for missing
+// read_all_orders scope (API hides old orders silently without it).
+async function shopifyOrderCount() {
+  try {
+    const r = await fetch(`https://${shopDomain()}/admin/api/${API_VERSION}/orders/count.json?status=any`, {
+      headers: { "X-Shopify-Access-Token": (process.env.SHOPIFY_ADMIN_TOKEN || "").trim() },
+    });
+    if (!r.ok) return null;
+    const b = await r.json();
+    return typeof b.count === "number" ? b.count : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // One resumable sync step. Returns { fetched, done, mode }.
 //
 // Backfill strategy: Shopify returns orders NEWEST-first regardless of any
@@ -130,12 +145,13 @@ async function upsertOrders(supaAdmin, orders) {
 // and ask the next chunk for orders created strictly before it — until
 // Shopify returns nothing. State version 2; v1 state (which trusted the
 // sort and could stop early) is discarded so the backfill restarts.
-async function runSync(supaAdmin) {
+async function runSync(supaAdmin, opts = {}) {
   const { data: row, error: settingsErr } = await supaAdmin.from("app_settings").select("data").eq("id", 1).maybeSingle();
   if (settingsErr) throw new Error("Supabase: " + settingsErr.message);
   const settings = (row && row.data) || {};
   const prevRaw = settings.shopifySync || {};
-  const prev = prevRaw.version === 2 ? prevRaw : {}; // v1 state is untrustworthy
+  // v1 state is untrustworthy; opts.full restarts the backfill from scratch
+  const prev = opts.full || prevRaw.version !== 2 ? {} : prevRaw;
 
   const backfillDone = !!prev.backfillDone;
   const mode = backfillDone ? "incremental" : "backfill";
@@ -193,7 +209,8 @@ async function runSync(supaAdmin) {
   }
 
   await supaAdmin.from("app_settings").upsert({ id: 1, data: { ...settings, shopifySync } });
-  return { fetched, done, mode };
+  const shopifyTotal = await shopifyOrderCount();
+  return { fetched, done, mode, shopifyTotal, oldestSeen: cursor };
 }
 
 async function isAuthorized(req, supaAdmin) {
@@ -221,7 +238,8 @@ module.exports = async (req, res) => {
       return res.status(401).json({ ok: false, error: "Not authorised — sign in and try again." });
     }
 
-    const result = await runSync(supaAdmin);
+    const full = /[?&]full=1/.test(req.url || "");
+    const result = await runSync(supaAdmin, { full });
     return res.status(200).json({ ok: true, ...result });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message || String(e) });

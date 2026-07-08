@@ -9,9 +9,11 @@ function ShopifySyncCard({ db, refetch }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [shopifyTotal, setShopifyTotal] = useState(null);
   const sync = db.settings.shopifySync;
+  const shopifySourced = db.orders.filter((o) => o.id.startsWith("shopify:")).length;
 
-  const runSync = async () => {
+  const runSync = async (full) => {
     setBusy(true);
     setResult(null);
     setError(null);
@@ -26,7 +28,7 @@ function ShopifySyncCard({ db, refetch }) {
       let mode = "backfill";
       let timeouts = 0;
       for (let round = 0; round < 80 && !done; round++) {
-        const resp = await fetch("/api/sync-shopify", {
+        const resp = await fetch("/api/sync-shopify" + (full && round === 0 ? "?full=1" : ""), {
           method: "POST",
           headers: { Authorization: "Bearer " + token },
         });
@@ -55,6 +57,7 @@ function ShopifySyncCard({ db, refetch }) {
         total += body.fetched;
         done = body.done !== false;
         mode = body.mode || mode;
+        if (body.shopifyTotal != null) setShopifyTotal(body.shopifyTotal);
         if (!done) setResult(`Syncing… ${total} orders so far, still going.`);
       }
       setResult(`Pulled ${total} order${total === 1 ? "" : "s"} from Shopify (${mode === "backfill" ? "history backfill complete" : "changes since last sync"}).`);
@@ -79,11 +82,29 @@ function ShopifySyncCard({ db, refetch }) {
         </div>
         <span className="row">
           <button className="btn small" onClick={() => setShowHelp(!showHelp)}>{showHelp ? "Hide setup" : "Setup guide"}</button>
-          <button className="btn primary" onClick={runSync} disabled={busy}>{busy ? "Syncing…" : "⟳ Sync Shopify now"}</button>
+          <button className="btn small" onClick={() => runSync(true)} disabled={busy} title="Re-fetch the entire order history from scratch">
+            Full re-sync
+          </button>
+          <button className="btn primary" onClick={() => runSync(false)} disabled={busy}>{busy ? "Syncing…" : "⟳ Sync Shopify now"}</button>
         </span>
       </div>
       {result && <div className="notice good mt">✅ {result}</div>}
       {error && <div className="notice bad mt">⚠️ {error}</div>}
+      {shopifyTotal != null && shopifySourced < shopifyTotal && (
+        <div className="notice bad mt">
+          🔒 <b>Shopify is holding back history:</b> it reports <b>{shopifyTotal}</b> orders in total, but only{" "}
+          <b>{shopifySourced}</b> made it here. That almost always means the custom app is missing the{" "}
+          <b>read_all_orders</b> permission (without it, the API only shares recent orders — no error, it just hides the
+          rest). Fix: Shopify admin → Settings → Apps and sales channels → Develop apps → your app →{" "}
+          <b>Configuration → Admin API integration</b> → tick <b>read_all_orders</b> → Save. If it's not in the list,
+          Shopify requires a quick support request to enable it for custom apps. Then press <b>Full re-sync</b>.
+        </div>
+      )}
+      {shopifyTotal != null && shopifySourced >= shopifyTotal && (
+        <div className="notice mt">
+          ✔ Complete: Shopify reports {shopifyTotal} orders and all of them are here.
+        </div>
+      )}
       {showHelp && (
         <div className="notice mt" style={{ lineHeight: 1.7 }}>
           <b>One-time setup (~5 minutes):</b>
