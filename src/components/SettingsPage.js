@@ -108,6 +108,27 @@ export default function SettingsPage({ db, update, user, refetch }) {
             <RateField label="Payment processing" suffix="%" value={s.paymentPct} onChange={setShopify("paymentPct")} />
             <RateField label="Payment fixed fee" suffix={currency} value={s.paymentFixed} onChange={setShopify("paymentFixed")} />
           </div>
+          <h2 style={{ marginTop: 18 }}>Profit split (Monthly figures)</h2>
+          <div className="card-sub">Applied to net profit on the Monthly figures page.</div>
+          <div className="form-row">
+            <label className="field">
+              <span className="lab">Partner name</span>
+              <input
+                type="text"
+                defaultValue={(db.settings.partner || {}).label || ""}
+                onBlur={(ev) => update((d) => ({ ...d, settings: { ...d.settings, partner: { ...(d.settings.partner || {}), label: ev.target.value.trim() || "Partner" } } }))}
+              />
+            </label>
+            <label className="field">
+              <span className="lab">Partner share (%)</span>
+              <input
+                type="number"
+                step="1"
+                defaultValue={(db.settings.partner || {}).pct ?? 0}
+                onBlur={(ev) => update((d) => ({ ...d, settings: { ...d.settings, partner: { ...(d.settings.partner || {}), pct: parseFloat(ev.target.value) || 0 } } }))}
+              />
+            </label>
+          </div>
           <label className="field">
             <span className="lab">Currency</span>
             <select
