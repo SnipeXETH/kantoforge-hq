@@ -122,51 +122,75 @@ async function upsertOrders(supaAdmin, orders) {
 }
 
 // One resumable sync step. Returns { fetched, done, mode }.
+//
+// Backfill strategy: Shopify returns orders NEWEST-first regardless of any
+// requested sort (the REST API ignores `order` when filters/pagination are
+// involved), so we never rely on ordering. Instead we window backwards
+// explicitly: fetch a chunk, remember the oldest created_at we've ever seen,
+// and ask the next chunk for orders created strictly before it — until
+// Shopify returns nothing. State version 2; v1 state (which trusted the
+// sort and could stop early) is discarded so the backfill restarts.
 async function runSync(supaAdmin) {
   const { data: row, error: settingsErr } = await supaAdmin.from("app_settings").select("data").eq("id", 1).maybeSingle();
   if (settingsErr) throw new Error("Supabase: " + settingsErr.message);
   const settings = (row && row.data) || {};
-  const prev = settings.shopifySync || {};
+  const prevRaw = settings.shopifySync || {};
+  const prev = prevRaw.version === 2 ? prevRaw : {}; // v1 state is untrustworthy
 
   const backfillDone = !!prev.backfillDone;
   const mode = backfillDone ? "incremental" : "backfill";
 
-  let url = `https://${shopDomain()}/admin/api/${API_VERSION}/orders.json?status=any&limit=250`;
+  const base = `https://${shopDomain()}/admin/api/${API_VERSION}/orders.json?status=any&limit=250`;
+  let url;
   if (mode === "backfill") {
-    url += "&order=" + encodeURIComponent("created_at asc");
-    if (prev.backfillCursor) url += `&created_at_min=${encodeURIComponent(prev.backfillCursor)}`;
+    url = base + (prev.backfillCursor ? `&created_at_max=${encodeURIComponent(prev.backfillCursor)}` : "");
   } else {
     const since = new Date(new Date(prev.lastSyncAt).getTime() - OVERLAP_MS).toISOString();
-    url += `&updated_at_min=${encodeURIComponent(since)}`;
+    url = base + `&updated_at_min=${encodeURIComponent(since)}`;
   }
 
   const started = Date.now();
   let fetched = 0;
   let cursor = prev.backfillCursor || null;
+  let done = false;
 
-  while (url && Date.now() - started < TIME_BUDGET_MS) {
+  while (Date.now() - started < TIME_BUDGET_MS) {
     const page = await fetchPage(url);
     const usable = page.orders.filter((o) => !o.test);
     await upsertOrders(supaAdmin, usable.map(mapOrder));
     fetched += usable.length;
-    if (page.orders.length) {
-      const last = page.orders[page.orders.length - 1];
-      if (last.created_at) cursor = last.created_at;
+    for (const o of page.orders) {
+      if (o.created_at && (!cursor || o.created_at < cursor)) cursor = o.created_at;
     }
-    url = page.nextUrl;
+    if (page.nextUrl) {
+      url = page.nextUrl; // keep paging within the current window
+    } else if (mode === "backfill" && page.orders.length > 0 && cursor) {
+      // window exhausted — open the next one, strictly older than everything seen
+      url = base + `&created_at_max=${encodeURIComponent(new Date(new Date(cursor).getTime() - 1000).toISOString())}`;
+    } else {
+      done = true; // Shopify returned nothing older — the whole history is in
+      break;
+    }
   }
 
-  const done = !url;
   const total = (prev.backfillFetched || 0) + (mode === "backfill" ? fetched : 0);
-  const shopifySync = done
-    ? {
-        backfillDone: true,
-        backfillFetched: mode === "backfill" ? total : prev.backfillFetched,
-        lastSyncAt: new Date().toISOString(),
-        lastFetched: fetched,
-        mode,
-      }
-    : { ...prev, backfillDone: false, backfillCursor: cursor, backfillFetched: total, mode };
+  let shopifySync;
+  if (done) {
+    shopifySync = {
+      version: 2,
+      backfillDone: true,
+      backfillFetched: mode === "backfill" ? total : prev.backfillFetched,
+      lastSyncAt: new Date().toISOString(),
+      lastFetched: fetched,
+      mode,
+    };
+  } else if (mode === "backfill") {
+    shopifySync = { version: 2, backfillDone: false, backfillCursor: cursor, backfillFetched: total, mode };
+  } else {
+    // interrupted incremental: keep state as-is so the next run just retries
+    // from the same lastSyncAt (upserts make the overlap harmless)
+    shopifySync = { ...prev, version: 2, mode };
+  }
 
   await supaAdmin.from("app_settings").upsert({ id: 1, data: { ...settings, shopifySync } });
   return { fetched, done, mode };
