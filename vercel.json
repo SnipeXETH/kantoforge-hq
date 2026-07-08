@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "api/sync-shopify.js": {
+      "maxDuration": 60
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/sync-shopify",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}

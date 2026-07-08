@@ -2,6 +2,87 @@ import React, { useMemo, useRef, useState } from "react";
 import { importCsvText, mergeOrders, FORMAT_LABELS } from "../lib/csv";
 import { enrichAll } from "../lib/calc";
 import { money, shortDate, monthKey } from "../lib/format";
+import { supabase } from "../lib/supabase";
+
+function ShopifySyncCard({ db, refetch }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const sync = db.settings.shopifySync;
+
+  const runSync = async () => {
+    setBusy(true);
+    setResult(null);
+    setError(null);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session && data.session.access_token;
+      const resp = await fetch("/api/sync-shopify", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token },
+      });
+      let body;
+      try {
+        body = await resp.json();
+      } catch (e) {
+        throw new Error("Sync endpoint not reachable (" + resp.status + "). It runs on the Vercel deployment, not on local dev servers.");
+      }
+      if (!body.ok) {
+        if (body.missing && body.missing.length) {
+          setShowHelp(true);
+          throw new Error("Not configured yet — missing: " + body.missing.join(", ") + ". Setup steps below.");
+        }
+        throw new Error(body.error || "Sync failed.");
+      }
+      setResult(`Pulled ${body.fetched} order${body.fetched === 1 ? "" : "s"} from Shopify (${body.mode === "full" ? "full history" : "changes since last sync"}).`);
+      await refetch();
+    } catch (e) {
+      setError(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card mt">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <div>
+          <h2><span className="badge shopify">Shopify</span> automatic sync</h2>
+          <div className="card-sub" style={{ marginBottom: 0 }}>
+            Pulls orders straight from Shopify — no CSVs needed. Also runs automatically every night at 3am.
+            {sync && sync.lastSyncAt ? <> Last sync: <b>{new Date(sync.lastSyncAt).toLocaleString("en-GB")}</b> ({sync.lastFetched} orders).</> : " Never synced yet."}
+          </div>
+        </div>
+        <span className="row">
+          <button className="btn small" onClick={() => setShowHelp(!showHelp)}>{showHelp ? "Hide setup" : "Setup guide"}</button>
+          <button className="btn primary" onClick={runSync} disabled={busy}>{busy ? "Syncing…" : "⟳ Sync Shopify now"}</button>
+        </span>
+      </div>
+      {result && <div className="notice good mt">✅ {result}</div>}
+      {error && <div className="notice bad mt">⚠️ {error}</div>}
+      {showHelp && (
+        <div className="notice mt" style={{ lineHeight: 1.7 }}>
+          <b>One-time setup (~5 minutes):</b>
+          <ol style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+            <li>Shopify admin → <b>Settings → Apps and sales channels → Develop apps</b> → Allow custom app development → <b>Create an app</b> (name it "KantoForge HQ").</li>
+            <li>In the app: <b>Configuration → Admin API integration</b> → tick <b>read_orders</b> (and <b>read_all_orders</b> if listed, for history beyond 60 days) → Save.</li>
+            <li><b>API credentials</b> tab → Install app → reveal the <b>Admin API access token</b> (starts <code>shpat_</code>) — copy it, it's shown once.</li>
+            <li>Vercel → your project → <b>Settings → Environment Variables</b>, add:
+              <div style={{ fontFamily: "monospace", fontSize: 12, margin: "4px 0" }}>
+                SHOPIFY_STORE_DOMAIN = your-store.myshopify.com<br />
+                SHOPIFY_ADMIN_TOKEN = shpat_…<br />
+                SUPABASE_SERVICE_ROLE_KEY = (Supabase → Settings → API → service_role)<br />
+                CRON_SECRET = any long random text
+              </div>
+            </li>
+            <li>Vercel → <b>Deployments</b> → redeploy the latest, then press <b>Sync Shopify now</b>. First run pulls your full history.</li>
+          </ol>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const PAGE_SIZE = 50;
 
@@ -120,7 +201,7 @@ function CoverageCard({ db, update }) {
   );
 }
 
-export default function OrdersPage({ db, update }) {
+export default function OrdersPage({ db, update, refetch }) {
   const fileRef = useRef(null);
   const [drag, setDrag] = useState(false);
   const [result, setResult] = useState(null);
@@ -203,6 +284,8 @@ export default function OrdersPage({ db, update }) {
           onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
         />
       </div>
+
+      <ShopifySyncCard db={db} refetch={refetch} />
 
       <CoverageCard db={db} update={update} />
 

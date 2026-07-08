@@ -38,6 +38,27 @@ First visit shows a **Create owner account** screen — that's you (admin). Then
      the orders file adds actual card-processing fees).
 4. **Team** → add your colleagues.
 
+## Shopify automatic sync (no CSVs)
+
+Orders & imports has a **Sync Shopify now** button, and a Vercel cron syncs
+automatically every night at 3am. One-time setup:
+
+1. Shopify admin → **Settings → Apps and sales channels → Develop apps** →
+   Allow custom app development → **Create an app** (e.g. "KantoForge HQ").
+2. App → **Configuration → Admin API integration** → tick **read_orders**
+   (and **read_all_orders** if listed, for history beyond 60 days) → Save.
+3. **API credentials** → Install app → copy the **Admin API access token** (`shpat_…`, shown once).
+4. Vercel → Settings → Environment Variables, add:
+   - `SHOPIFY_STORE_DOMAIN` — e.g. `your-store.myshopify.com`
+   - `SHOPIFY_ADMIN_TOKEN` — the `shpat_…` token
+   - `SUPABASE_SERVICE_ROLE_KEY` — Supabase → Settings → API → `service_role` (server-side only, never exposed to browsers)
+   - `CRON_SECRET` — any long random string (authenticates the nightly cron)
+5. Redeploy, then press **Sync Shopify now**. The first run pulls full history;
+   later runs only fetch changes. CSV import still works and remains the route for Etsy.
+
+The endpoint (`api/sync-shopify.js`) only responds to signed-in team members or
+the cron secret.
+
 ## How profit is calculated
 
 ```
