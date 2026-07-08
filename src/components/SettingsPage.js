@@ -99,6 +99,18 @@ export default function SettingsPage({ db, update, user, refetch }) {
             <RateField label="Offsite ads fee" suffix="%" value={e.offsiteAdsPct} onChange={setEtsy("offsiteAdsPct")} hint="12% if you did over $10k/yr, else 15%" />
             <RateField label="Share of orders via offsite ads" suffix="%" value={e.offsiteAdsShare} onChange={setEtsy("offsiteAdsShare")} hint="Rough average — 0 to ignore" />
           </div>
+          <label className="field">
+            <span className="lab">Etsy orders in Shopify since</span>
+            <input
+              type="date"
+              defaultValue={db.settings.etsyCutover || ""}
+              onBlur={(ev) => update((d) => ({ ...d, settings: { ...d.settings, etsyCutover: ev.target.value } }))}
+            />
+            <span className="hint">
+              The day the Etsy→Shopify integration went live. Etsy CSV imports skip orders on/after this date so sales
+              aren't double-counted.
+            </span>
+          </label>
         </div>
 
         <div className="card" style={{ margin: 0 }}>

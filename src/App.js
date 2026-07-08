@@ -40,7 +40,7 @@ const NAV = [
   { key: "analytics", label: "Analytics", icon: "analytics" },
   { key: "monthly", label: "Monthly figures", icon: "monthly" },
   { section: "Operations" },
-  { key: "orders", label: "Orders & imports", icon: "orders" },
+  { key: "orders", label: "Orders", icon: "orders" },
   { key: "costs", label: "Costs", icon: "costs" },
   { key: "pricing", label: "Pricing calculator", icon: "pricing" },
   { section: "Team" },

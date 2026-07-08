@@ -80,9 +80,14 @@ function mapOrder(o) {
     (o.customer && `${o.customer.first_name || ""} ${o.customer.last_name || ""}`.trim()) ||
     (o.billing_address && o.billing_address.name) ||
     "";
+  // Orders pushed into Shopify by the Etsy integration are tagged "Etsy"
+  // (and usually carry an etsy-ish source_name) — they belong to the Etsy
+  // channel and its fee model.
+  const isEtsy = /(^|,)\s*etsy\s*(,|$)/i.test(o.tags || "") || /etsy/i.test(o.source_name || "");
   return {
     id: "shopify:" + o.name,
-    platform: "shopify",
+    platform: isEtsy ? "etsy" : "shopify",
+    channelVia: "shopify",
     orderId: o.name,
     date: o.created_at ? new Date(o.created_at).toISOString() : null,
     currency: o.currency || "GBP",
@@ -95,7 +100,9 @@ function mapOrder(o) {
     refunded,
     feesActual: null,
     buyer,
+    email: o.email || o.contact_email || (o.customer && o.customer.email) || "",
     status: o.financial_status || "paid",
+    tags: o.tags || "",
     items,
     source: "api",
   };
@@ -105,7 +112,7 @@ async function upsertOrders(supaAdmin, orders) {
   for (let i = 0; i < orders.length; i += 400) {
     const chunk = orders.slice(i, i + 400).map((order) => ({
       id: order.id,
-      platform: "shopify",
+      platform: order.platform,
       order_date: order.date,
       data: order,
     }));

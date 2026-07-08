@@ -104,26 +104,26 @@ export default function Dashboard({ db, user, go }) {
 
           <div className="grid two mt">
             <div className="card" style={{ margin: 0 }}>
-              <h2>Revenue by platform</h2>
+              <h2>Revenue by channel</h2>
               <div className="card-sub">Where the money comes from.</div>
               <Donut
                 currency={currency}
                 centerLabel={[money(t.revenue, currency), "revenue"]}
                 segments={[
-                  { label: "Shopify", value: plat.shopify.revenue, color: "var(--c-shopify)" },
+                  { label: "Website", value: plat.shopify.revenue, color: "var(--c-shopify)" },
                   { label: "Etsy", value: plat.etsy.revenue, color: "var(--c-etsy)" },
                 ]}
               />
             </div>
             <div className="card" style={{ margin: 0 }}>
-              <h2>Platform scorecard</h2>
+              <h2>Channel scorecard</h2>
               <div className="card-sub">Same period, side by side.</div>
               <div className="table-wrap">
                 <table className="data">
                   <thead>
                     <tr>
                       <th></th>
-                      <th className="num"><span className="badge shopify">Shopify</span></th>
+                      <th className="num"><span className="badge shopify">Website</span></th>
                       <th className="num"><span className="badge etsy">Etsy</span></th>
                     </tr>
                   </thead>
