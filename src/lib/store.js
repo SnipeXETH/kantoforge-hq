@@ -71,13 +71,29 @@ async function must(query) {
   return data;
 }
 
+// Supabase caps any single query at 1000 rows (PostgREST max-rows), so a store
+// with thousands of orders would silently load only the newest 1000. Page
+// through in 1000-row windows with .range() until a short page ends it.
+const PAGE = 1000;
+async function fetchAll(table, { select = "data", order } = {}) {
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    let q = supabase.from(table).select(select).range(from, from + PAGE - 1);
+    if (order) q = q.order(order.column, { ascending: order.ascending });
+    const batch = await must(q);
+    rows.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return rows;
+}
+
 export async function fetchDb() {
   const [profiles, orders, productCosts, fixedCosts, tasks, settingsRow] = await Promise.all([
-    must(supabase.from("profiles").select("*").order("created_at", { ascending: true })),
-    must(supabase.from("orders").select("data").order("order_date", { ascending: false })),
-    must(supabase.from("product_costs").select("data")),
-    must(supabase.from("fixed_costs").select("data")),
-    must(supabase.from("tasks").select("data")),
+    fetchAll("profiles", { select: "*", order: { column: "created_at", ascending: true } }),
+    fetchAll("orders", { select: "data", order: { column: "order_date", ascending: false } }),
+    fetchAll("product_costs"),
+    fetchAll("fixed_costs"),
+    fetchAll("tasks"),
     must(supabase.from("app_settings").select("data").eq("id", 1).maybeSingle()),
   ]);
   // monthly_figures was added later — tolerate the table not existing yet so
@@ -85,7 +101,7 @@ export async function fetchDb() {
   let monthlyFigures = [];
   let monthlyFiguresReady = true;
   try {
-    const rows = await must(supabase.from("monthly_figures").select("data"));
+    const rows = await fetchAll("monthly_figures");
     monthlyFigures = rows.map((r) => r.data).sort((a, b) => (b.id || "").localeCompare(a.id || ""));
   } catch (e) {
     monthlyFiguresReady = false;
