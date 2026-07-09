@@ -90,19 +90,19 @@ function ShopifySyncCard({ db, refetch }) {
       </div>
       {result && <div className="notice good mt">✅ {result}</div>}
       {error && <div className="notice bad mt">⚠️ {error}</div>}
-      {shopifyTotal != null && shopifySourced < shopifyTotal && (
+      {shopifyTotal != null && shopifyTotal - shopifySourced > Math.max(3, shopifyTotal * 0.01) && (
         <div className="notice bad mt">
           🔒 <b>Shopify is holding back history:</b> it reports <b>{shopifyTotal}</b> orders in total, but only{" "}
-          <b>{shopifySourced}</b> made it here. That almost always means the custom app is missing the{" "}
-          <b>read_all_orders</b> permission (without it, the API only shares recent orders — no error, it just hides the
-          rest). Fix: Shopify admin → Settings → Apps and sales channels → Develop apps → your app →{" "}
-          <b>Configuration → Admin API integration</b> → tick <b>read_all_orders</b> → Save. If it's not in the list,
-          Shopify requires a quick support request to enable it for custom apps. Then press <b>Full re-sync</b>.
+          <b>{shopifySourced}</b> made it here. Without the <b>read_all_orders</b> permission the API only shares
+          recent orders (no error — it just hides the rest). Two fixes: get the permission enabled (custom app →
+          Configuration → Admin API integration → <b>read_all_orders</b> → Save → <b>Full re-sync</b>), or simply
+          export the missing date ranges as CSVs from Shopify admin (Orders → Export → by date) and drop them below —
+          CSV exports aren't limited, and the numbers reconcile here automatically.
         </div>
       )}
-      {shopifyTotal != null && shopifySourced >= shopifyTotal && (
+      {shopifyTotal != null && shopifyTotal - shopifySourced <= Math.max(3, shopifyTotal * 0.01) && (
         <div className="notice mt">
-          ✔ Complete: Shopify reports {shopifyTotal} orders and all of them are here.
+          ✔ Complete: Shopify reports {shopifyTotal} orders and {shopifySourced >= shopifyTotal ? "all of them are" : "effectively all of them are"} here.
         </div>
       )}
       {showHelp && (
