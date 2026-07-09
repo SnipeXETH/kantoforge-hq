@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { supabase } from "../lib/supabase";
 import { shortDate } from "../lib/format";
+import { RoleBadges, BADGE_OPTIONS, BADGE_COLORS } from "./badges";
 
 export default function TeamPage({ db, update, user }) {
   const isAdmin = user.role === "admin";
@@ -32,6 +33,17 @@ export default function TeamPage({ db, update, user }) {
     }));
   };
 
+  const toggleBadge = (target, badge) => {
+    update((d) => ({
+      ...d,
+      users: d.users.map((u) => {
+        if (u.id !== target.id) return u;
+        const has = (u.badges || []).includes(badge);
+        return { ...u, badges: has ? u.badges.filter((b) => b !== badge) : [...(u.badges || []), badge] };
+      }),
+    }));
+  };
+
   const admins = db.users.filter((u) => u.role === "admin").length;
 
   return (
@@ -51,7 +63,7 @@ export default function TeamPage({ db, update, user }) {
         <div className="table-wrap">
           <table className="data">
             <thead>
-              <tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th>{isAdmin && <th></th>}</tr>
+              <tr><th>Name</th><th>Email</th><th>Access</th><th>Badges</th><th>Joined</th>{isAdmin && <th></th>}</tr>
             </thead>
             <tbody>
               {db.users.map((u) => (
@@ -67,11 +79,42 @@ export default function TeamPage({ db, update, user }) {
                   </td>
                   <td className="muted">{u.email}</td>
                   <td><span className={"badge " + (u.role === "admin" ? "red" : "gray")}>{u.role}</span></td>
+                  <td>
+                    {isAdmin ? (
+                      <span className="row" style={{ gap: 5 }}>
+                        {BADGE_OPTIONS.map((b) => {
+                          const on = (u.badges || []).includes(b);
+                          const c = BADGE_COLORS[b];
+                          return (
+                            <button
+                              key={b}
+                              type="button"
+                              className="role-badge"
+                              onClick={() => toggleBadge(u, b)}
+                              title={on ? "Remove " + b : "Add " + b}
+                              style={{
+                                cursor: "pointer",
+                                color: on ? c : "var(--text-3)",
+                                borderColor: on ? c + "66" : "var(--border-strong)",
+                                background: on ? c + "1f" : "transparent",
+                                fontSize: 10.5,
+                                opacity: on ? 1 : 0.55,
+                              }}
+                            >
+                              {b}
+                            </button>
+                          );
+                        })}
+                      </span>
+                    ) : (
+                      <RoleBadges badges={u.badges} size={10.5} />
+                    )}
+                  </td>
                   <td className="muted">{shortDate(u.createdAt)}</td>
                   {isAdmin && (
                     <td className="num">
                       <span className="row" style={{ justifyContent: "flex-end" }}>
-                        <button className="btn small" onClick={() => sendReset(u)}>Send password reset</button>
+                        <button className="btn small" onClick={() => sendReset(u)}>Reset password</button>
                         <button
                           className="btn small"
                           disabled={u.id === user.id || (u.role === "admin" && admins <= 1)}

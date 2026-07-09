@@ -56,6 +56,7 @@ const TABLE_MAP = [
   ["fixedCosts", "fixed_costs"],
   ["tasks", "tasks"],
   ["monthlyFigures", "monthly_figures"],
+  ["commissions", "commissions"],
 ];
 
 const CHUNK = 400;
@@ -107,14 +108,26 @@ export async function fetchDb() {
     monthlyFiguresReady = false;
   }
 
+  // commissions was added later too — tolerate the table not existing yet
+  let commissions = [];
+  let commissionsReady = true;
+  try {
+    const rows = await fetchAll("commissions");
+    commissions = rows.map((r) => r.data).sort((a, b) => (b.requestedAt || "").localeCompare(a.requestedAt || ""));
+  } catch (e) {
+    commissionsReady = false;
+  }
+
   return {
-    users: profiles.map((p) => ({ id: p.id, name: p.name, email: p.email, role: p.role, createdAt: p.created_at })),
+    users: profiles.map((p) => ({ id: p.id, name: p.name, email: p.email, role: p.role, badges: p.badges || [], createdAt: p.created_at })),
     orders: orders.map((r) => r.data),
     productCosts: productCosts.map((r) => r.data),
     fixedCosts: fixedCosts.map((r) => r.data),
     tasks: tasks.map((r) => r.data).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")),
     monthlyFigures,
     monthlyFiguresReady,
+    commissions,
+    commissionsReady,
     settings: mergeSettings(settingsRow ? settingsRow.data : null),
   };
 }
@@ -143,11 +156,14 @@ export async function syncDb(prev, next) {
     jobs.push(must(supabase.from("app_settings").upsert({ id: 1, data: next.settings })));
   }
   if (prev.users !== next.users) {
-    const prevRole = new Map(prev.users.map((u) => [u.id, u.role]));
+    const prevById = new Map(prev.users.map((u) => [u.id, u]));
     for (const u of next.users) {
-      if (prevRole.has(u.id) && prevRole.get(u.id) !== u.role) {
-        jobs.push(must(supabase.from("profiles").update({ role: u.role }).eq("id", u.id)));
-      }
+      const p = prevById.get(u.id);
+      if (!p) continue;
+      const patch = {};
+      if (p.role !== u.role) patch.role = u.role;
+      if (JSON.stringify(p.badges || []) !== JSON.stringify(u.badges || [])) patch.badges = u.badges || [];
+      if (Object.keys(patch).length) jobs.push(must(supabase.from("profiles").update(patch).eq("id", u.id)));
     }
   }
   await Promise.all(jobs);
