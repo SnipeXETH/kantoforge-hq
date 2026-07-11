@@ -9,5 +9,9 @@
       "path": "/api/sync-shopify",
       "schedule": "0 3 * * *"
     }
+  ],
+  "rewrites": [
+    { "source": "/raffles", "destination": "/index.html" },
+    { "source": "/raffles/(.*)", "destination": "/index.html" }
   ]
 }
