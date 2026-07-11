@@ -73,7 +73,20 @@
 .pub-count-box i { font-style: normal; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-3); }
 .pub-price-big { font-size: 26px; font-weight: 750; margin: 18px 0; }
 .pub-price-big i { font-style: normal; font-size: 14px; color: var(--text-3); font-weight: 500; }
-.pub-winner-banner { background: rgba(12, 163, 12, 0.1); border: 1px solid rgba(12, 163, 12, 0.4); color: #a5e0ab; border-radius: 10px; padding: 12px 14px; font-size: 16px; margin: 16px 0; }
+.pub-winner-banner { background: rgba(12, 163, 12, 0.1); border: 1px solid rgba(12, 163, 12, 0.4); color: #a5e0ab; border-radius: 10px; padding: 12px 14px; font-size: 15px; margin: 16px 0; }
+.pub-winner-line { padding: 3px 0; }
+.pub-winner-line b { color: #c6ecca; }
+
+.pub-scarcity { margin-top: 8px; color: #ffb37a; font-weight: 700; font-size: 13px; }
+.pub-share { width: auto; padding: 6px 12px; font-size: 13px; }
+
+/* how it works */
+.pub-how h1 { font-size: 30px; margin-bottom: 8px; }
+.pub-lead { font-size: 17px; color: var(--text-2); max-width: 640px; }
+.pub-steps { list-style: none; padding: 0; margin: 24px 0; display: grid; gap: 14px; }
+.pub-steps li { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: 16px 18px; }
+.pub-steps h3 { margin: 0 0 6px; font-size: 16px; }
+.pub-steps p { margin: 0; color: var(--text-2); font-size: 14px; }
 
 .pub-enter { border-top: 1px solid var(--border); padding-top: 18px; margin-top: 4px; }
 .pub-enter h3 { margin: 0 0 8px; }

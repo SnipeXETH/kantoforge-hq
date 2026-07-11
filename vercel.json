@@ -11,7 +11,7 @@
     }
   ],
   "rewrites": [
-    { "source": "/raffles", "destination": "/index.html" },
-    { "source": "/raffles/(.*)", "destination": "/index.html" }
+    { "source": "/raffles", "destination": "/api/raffle-og" },
+    { "source": "/raffles/:id", "destination": "/api/raffle-og?id=:id" }
   ]
 }
