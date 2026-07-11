@@ -8,6 +8,14 @@
 
 const { createClient } = require("@supabase/supabase-js");
 
+// A competition auto-closes for entry once its close date passes or it sells out.
+function effectiveStatus(c, sold) {
+  if (c.status !== "open") return c.status;
+  const past = c.closesAt && new Date(c.closesAt + "T23:59:59").getTime() < Date.now();
+  const full = c.maxTickets && sold >= c.maxTickets;
+  return past || full ? "closed" : "open";
+}
+
 function sanitize(c, ticketsSold) {
   const pub = {
     id: c.id,
@@ -17,10 +25,13 @@ function sanitize(c, ticketsSold) {
     ticketPrice: c.ticketPrice,
     maxTickets: c.maxTickets,
     closesAt: c.closesAt || null,
+    drawDate: c.drawDate || null,
     question: c.question,
     answers: c.answers, // options only — which one is correct is NOT exposed
     freeEntryInfo: c.freeEntryInfo || "",
-    status: c.status,
+    cashAlternative: c.cashAlternative || "",
+    prizeTiers: c.prizeTiers || [],
+    status: c.status === "drawn" ? "drawn" : effectiveStatus(c, ticketsSold),
     serverSeedHash: c.serverSeedHash, // the commitment — meant to be public
     ticketsSold,
   };
@@ -32,6 +43,9 @@ function sanitize(c, ticketsSold) {
       finalHash: c.draw.finalHash,
       winningTicket: c.draw.winningTicket,
       winnerName: c.draw.winnerName,
+      winners: (c.draw.winners || [{ place: 0, winningTicket: c.draw.winningTicket, winnerName: c.draw.winnerName, prize: c.title }]).map((w) => ({
+        place: w.place, winningTicket: w.winningTicket, winnerName: w.winnerName, prize: w.prize || null,
+      })),
       revealedSeed: c.draw.revealedSeed, // safe post-draw: enables verification
     };
   }

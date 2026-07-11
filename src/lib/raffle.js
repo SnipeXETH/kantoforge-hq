@@ -54,3 +54,27 @@ export async function verifyDraw({ serverSeed, serverSeedHash, publicEntropy, ti
   const { winningTicket: recomputed, finalHash } = await deriveWinningTicket(serverSeed, publicEntropy, ticketsTotal);
   return { commitOk, ticketOk: recomputed === winningTicket, recomputed, finalHash };
 }
+
+// Draw `count` DISTINCT winning tickets deterministically (main prize + runner-ups).
+// Winner i derives from sha256(seed:entropy:i); collisions probe forward so every
+// winner is a different ticket. Fully reproducible from the revealed values.
+export async function deriveWinners(serverSeed, publicEntropy, ticketsTotal, count) {
+  const winners = [];
+  const used = new Set();
+  const cnt = Math.max(1, Math.min(count, ticketsTotal));
+  for (let i = 0; winners.length < cnt; i++) {
+    const finalHash = await sha256hex(serverSeed + ":" + (publicEntropy || "") + ":" + i);
+    let ticket = Number(BigInt("0x" + finalHash) % BigInt(ticketsTotal)) + 1;
+    while (used.has(ticket)) ticket = (ticket % ticketsTotal) + 1;
+    used.add(ticket);
+    winners.push({ place: winners.length, finalHash, winningTicket: ticket });
+  }
+  return winners;
+}
+
+export async function verifyWinners({ serverSeed, serverSeedHash, publicEntropy, ticketsTotal, winners }) {
+  const commitOk = (await sha256hex(serverSeed)) === serverSeedHash;
+  const recomputed = await deriveWinners(serverSeed, publicEntropy, ticketsTotal, winners.length);
+  const ticketOk = recomputed.every((w, i) => w.winningTicket === winners[i].winningTicket);
+  return { commitOk, ticketOk, recomputed };
+}

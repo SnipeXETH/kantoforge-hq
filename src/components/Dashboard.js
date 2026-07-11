@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { enrichAll, filterByRange, totals, byPlatform, monthlySeries, monthsSpanned } from "../lib/calc";
 import { money, pct, monthLabel } from "../lib/format";
 import { GroupedBars, Donut } from "./charts";
+import { ticketsSold, effectiveStatus, compFinancials } from "../lib/comp";
 
 const RANGES = [
   ["30d", "30 days"],
@@ -26,7 +27,7 @@ export default function Dashboard({ db, user, go }) {
   const [range, setRange] = useState("90d");
   const currency = db.settings.currency;
 
-  const { t, plat, months, fixedMonthly, netAfterFixed, openTasks } = useMemo(() => {
+  const { t, plat, months, fixedMonthly, netAfterFixed, openTasks, compLive, compRaised } = useMemo(() => {
     const enriched = filterByRange(enrichAll(db.orders, db.settings, db.productCosts), range);
     const t = totals(enriched);
     const plat = byPlatform(enriched);
@@ -34,7 +35,13 @@ export default function Dashboard({ db, user, go }) {
     const fixedMonthly = db.fixedCosts.reduce((s, c) => s + (c.monthly || 0), 0);
     const netAfterFixed = t.profit - fixedMonthly * monthsSpanned(enriched);
     const openTasks = db.tasks.filter((x) => x.status !== "done").length;
-    return { t, plat, months, fixedMonthly, netAfterFixed, openTasks };
+    let compLive = 0, compRaised = 0;
+    for (const c of db.competitions || []) {
+      const sold = ticketsSold((db.raffleEntries || []).filter((e) => e.competitionId === c.id));
+      if (effectiveStatus(c, sold) === "open") compLive++;
+      compRaised += compFinancials(c, sold).raised;
+    }
+    return { t, plat, months, fixedMonthly, netAfterFixed, openTasks, compLive, compRaised };
   }, [db, range]);
 
   const hasData = db.orders.length > 0;
@@ -49,6 +56,13 @@ export default function Dashboard({ db, user, go }) {
         </div>
         <RangePills range={range} setRange={setRange} />
       </div>
+
+      {(db.competitions || []).length > 0 && (
+        <div className="notice mb" style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <span>🎟️ <b>{compLive}</b> live competition{compLive === 1 ? "" : "s"} · <b>{money(compRaised, currency)}</b> raised all-time</span>
+          <a href="#raffles" onClick={(e) => { e.preventDefault(); go("raffles"); }}>Manage competitions →</a>
+        </div>
+      )}
 
       {!hasData && (
         <div className="card" style={{ textAlign: "center", padding: 40 }}>
