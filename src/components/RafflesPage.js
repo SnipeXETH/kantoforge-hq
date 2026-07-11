@@ -436,7 +436,10 @@ export default function RafflesPage({ db, update, user }) {
               <h1>Competitions</h1>
               <div className="sub">Skill-based prize competitions with a provably-fair draw. Payments &amp; public pages come next — this is the engine.</div>
             </div>
-            {isAdmin && <button className="btn primary" onClick={() => setCreating(!creating)}>{creating ? "Cancel" : "+ New competition"}</button>}
+            <div className="row">
+              <a className="btn" href={window.location.origin + "/raffles"} target="_blank" rel="noreferrer">🌐 Preview public site</a>
+              {isAdmin && <button className="btn primary" onClick={() => setCreating(!creating)}>{creating ? "Cancel" : "+ New competition"}</button>}
+            </div>
           </div>
 
           <div className="notice mb small">

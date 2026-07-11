@@ -64,6 +64,7 @@ a { color: var(--accent-hi); text-decoration: none; }
   flex-direction: column;
   padding: 18px 12px;
   gap: 4px;
+  overflow-y: auto;
 }
 
 .sidebar .brand {
