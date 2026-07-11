@@ -104,6 +104,17 @@
 .pub-verify.ok { background: rgba(12, 163, 12, 0.1); border: 1px solid rgba(12, 163, 12, 0.4); color: #a5e0ab; }
 .pub-verify.bad { background: rgba(232, 50, 63, 0.1); border: 1px solid rgba(232, 50, 63, 0.4); color: #ff9ba2; }
 
+@media (max-width: 600px) {
+  .pub-header img { height: 18px; }
+  .pub-header nav { gap: 14px; }
+  .pub-header nav a { font-size: 13px; }
+  .pub-hero { padding: 38px 0 28px; }
+  .pub-grid { grid-template-columns: 1fr; }
+  .pub-detail-info h1 { font-size: 24px; }
+  .pub-hashrow { flex-direction: column; gap: 2px; }
+  .pub-hashrow span { min-width: 0; }
+}
+
 .pub-footer { margin-top: auto; border-top: 1px solid var(--border); padding: 26px 0 40px; }
 .pub-footer p { font-size: 13px; color: var(--text-2); margin: 0 0 6px; }
 .pub-footer .pub-muted { font-size: 12px; }

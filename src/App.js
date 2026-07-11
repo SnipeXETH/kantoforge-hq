@@ -95,6 +95,7 @@ export default function App() {
   const [loadErr, setLoadErr] = useState(null);
   const [syncErr, setSyncErr] = useState(null);
   const [pageKey, setPageKey] = useState("dashboard");
+  const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
     if (!isConfigured) return;
@@ -196,9 +197,12 @@ export default function App() {
     settings: <SettingsPage db={db} update={update} user={user} refetch={refetch} />,
   };
 
+  const currentLabel = (NAV.find((n) => n.key === pageKey) || {}).label || "KantoForge HQ";
+
   return (
     <div className="shell">
-      <aside className="sidebar">
+      <div className={"nav-backdrop" + (navOpen ? " show" : "")} onClick={() => setNavOpen(false)} aria-hidden="true" />
+      <aside className={"sidebar" + (navOpen ? " open" : "")}>
         <div className="brand">
           <img src={logo} alt="KantoForge HQ" />
         </div>
@@ -209,7 +213,7 @@ export default function App() {
             <button
               key={item.key}
               className={"nav-item" + (pageKey === item.key ? " active" : "")}
-              onClick={() => setPageKey(item.key)}
+              onClick={() => { setPageKey(item.key); setNavOpen(false); }}
             >
               <Icon name={item.icon} />
               {item.label}
@@ -230,18 +234,27 @@ export default function App() {
           <button className="btn small" onClick={logout} title="Log out">⎋</button>
         </div>
       </aside>
-      <main className="main">
-        {syncErr && (
-          <div className="notice bad mb" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span>⚠️ A change failed to save: {syncErr}</span>
-            <span className="row">
-              <button className="btn small" onClick={() => { setSyncErr(null); refetch(); }}>Reload data</button>
-              <button className="btn small" onClick={() => setSyncErr(null)}>Dismiss</button>
-            </span>
-          </div>
-        )}
-        {pages[pageKey]}
-      </main>
+      <div className="content">
+        <header className="mobile-topbar">
+          <button className="hamburger" onClick={() => setNavOpen((v) => !v)} aria-label="Menu">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
+          <span className="mt-title">{currentLabel}</span>
+          <img className="mt-logo" src={logo} alt="KantoForge HQ" />
+        </header>
+        <main className="main">
+          {syncErr && (
+            <div className="notice bad mb" style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <span>⚠️ A change failed to save: {syncErr}</span>
+              <span className="row">
+                <button className="btn small" onClick={() => { setSyncErr(null); refetch(); }}>Reload data</button>
+                <button className="btn small" onClick={() => setSyncErr(null)}>Dismiss</button>
+              </span>
+            </div>
+          )}
+          {pages[pageKey]}
+        </main>
+      </div>
     </div>
   );
 }
