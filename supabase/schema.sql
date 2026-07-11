@@ -95,6 +95,20 @@ create table public.commissions (
   updated_at timestamptz not null default now()
 );
 
+create table public.competitions (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+create table public.raffle_entries (
+  id text primary key,
+  competition_id text,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+create index raffle_entries_comp on public.raffle_entries (competition_id);
+
 insert into public.app_settings (id, data) values (1, '{}'::jsonb);
 
 -- ---------------------------------------------------------------------------
@@ -109,6 +123,8 @@ alter table public.tasks enable row level security;
 alter table public.app_settings enable row level security;
 alter table public.monthly_figures enable row level security;
 alter table public.commissions enable row level security;
+alter table public.competitions enable row level security;
+alter table public.raffle_entries enable row level security;
 
 create policy "team can read profiles" on public.profiles
   for select to authenticated using (true);
@@ -131,6 +147,10 @@ create policy "team full access" on public.monthly_figures
   for all to authenticated using (true) with check (true);
 create policy "team full access" on public.commissions
   for all to authenticated using (true) with check (true);
+create policy "team full access" on public.competitions
+  for all to authenticated using (true) with check (true);
+create policy "team full access" on public.raffle_entries
+  for all to authenticated using (true) with check (true);
 
 -- ---------------------------------------------------------------------------
 -- Realtime: lets everyone's dashboard update live when a teammate changes data
@@ -143,4 +163,6 @@ alter publication supabase_realtime add table
   public.app_settings,
   public.monthly_figures,
   public.commissions,
+  public.competitions,
+  public.raffle_entries,
   public.profiles;

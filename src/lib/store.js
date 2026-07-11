@@ -57,12 +57,15 @@ const TABLE_MAP = [
   ["tasks", "tasks"],
   ["monthlyFigures", "monthly_figures"],
   ["commissions", "commissions"],
+  ["competitions", "competitions"],
+  ["raffleEntries", "raffle_entries"],
 ];
 
 const CHUNK = 400;
 
 function rowFor(table, item) {
   if (table === "orders") return { id: item.id, platform: item.platform, order_date: item.date || null, data: item };
+  if (table === "raffle_entries") return { id: item.id, competition_id: item.competitionId || null, data: item };
   return { id: item.id, data: item };
 }
 
@@ -118,6 +121,18 @@ export async function fetchDb() {
     commissionsReady = false;
   }
 
+  // raffles / competitions — added later; tolerate the tables not existing yet
+  let competitions = [];
+  let raffleEntries = [];
+  let rafflesReady = true;
+  try {
+    const [cs, es] = await Promise.all([fetchAll("competitions"), fetchAll("raffle_entries")]);
+    competitions = cs.map((r) => r.data).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    raffleEntries = es.map((r) => r.data);
+  } catch (e) {
+    rafflesReady = false;
+  }
+
   return {
     users: profiles.map((p) => ({ id: p.id, name: p.name, email: p.email, role: p.role, badges: p.badges || [], createdAt: p.created_at })),
     orders: orders.map((r) => r.data),
@@ -128,6 +143,9 @@ export async function fetchDb() {
     monthlyFiguresReady,
     commissions,
     commissionsReady,
+    competitions,
+    raffleEntries,
+    rafflesReady,
     settings: mergeSettings(settingsRow ? settingsRow.data : null),
   };
 }
