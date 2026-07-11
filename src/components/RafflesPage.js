@@ -279,6 +279,19 @@ function CompetitionDetail({ comp, db, user, update, onBack }) {
             {comp.status === "draft" && <button className="btn primary small" onClick={() => setStatus("open", "Opened entries")}>Open entries</button>}
             {comp.status === "open" && <button className="btn small" onClick={() => setStatus("closed", "Closed entries")}>Close entries</button>}
             {comp.status === "closed" && <button className="btn small" onClick={() => setStatus("open", "Reopened entries")}>Reopen</button>}
+            <span className="spacer" />
+            <button
+              className={"btn small " + (comp.isPublic ? "primary" : "")}
+              onClick={() => setComp((c) => ({ ...c, isPublic: !c.isPublic }), comp.isPublic ? "Hidden from public site" : "Published to public site")}
+            >
+              {comp.isPublic ? "● Live on public site" : "○ Publish to public site"}
+            </button>
+          </div>
+        )}
+        {comp.isPublic && (
+          <div className="notice good mt small">
+            🌐 Public page: <a href={window.location.origin + "/raffles/" + comp.id} target="_blank" rel="noreferrer">{window.location.origin}/raffles/{comp.id}</a>
+            {comp.status === "draft" && <span className="muted"> — publishes once you open entries (drafts stay hidden).</span>}
           </div>
         )}
       </div>
