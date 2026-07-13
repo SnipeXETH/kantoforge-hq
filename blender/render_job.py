@@ -15,6 +15,7 @@
 
 import bpy
 import os
+import time
 import shutil
 
 
@@ -167,9 +168,8 @@ bpy.ops.render.render()
 
 
 # 6. Return the .blend's finished composited image, not the raw render buffer.
-#    This file overlays KantoForge branding via a compositor "Overlayed" output;
-#    that branded image is the real deliverable. KF_OUTPUT_PREFER picks which
-#    File Output to use when there are several (default: the "overlay" one).
+#    The compositor writes File Output folders (e.g. Renders_Overlayed with
+#    KantoForge branding — the real deliverable). KF_OUTPUT_PREFER picks which.
 def newest_image_in(folder):
     exts = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".exr")
     best, best_m = None, -1
@@ -187,31 +187,34 @@ def newest_image_in(folder):
     return best
 
 
-def finished_output():
-    prefer = (env("KF_OUTPUT_PREFER", "overlay") or "overlay").lower()
-    nodes = []
-    if scene.use_nodes and scene.node_tree:
-        for node in scene.node_tree.nodes:
-            if node.type == "OUTPUT_FILE":
-                nodes.append((node.name, bpy.path.abspath(node.base_path)))
-    if nodes:
-        print("KF: compositor File Output folders:", [n[0] for n in nodes])
-    # prefer a node whose name or folder matches the preference (e.g. "overlay")
-    for name, base in nodes:
-        if prefer in (name + " " + base).lower():
-            img = newest_image_in(base)
-            if img:
-                return img
-    # otherwise the newest image any File Output produced
-    for name, base in nodes:
-        img = newest_image_in(base)
-        if img:
-            return img
-    return None
+def slugify(s):
+    out = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in (s or "").strip())
+    return out.strip("_")[:60]
 
+
+# The image each compositor File Output just produced this render.
+produced = []  # (node_name, base_folder, newest_file)
+if scene.use_nodes and scene.node_tree:
+    for node in scene.node_tree.nodes:
+        if node.type == "OUTPUT_FILE":
+            base = bpy.path.abspath(node.base_path)
+            f = newest_image_in(base)
+            if f:
+                produced.append((node.name, base, f))
+if produced:
+    print("KF: compositor outputs:", [p[0] for p in produced])
+
+# Pick the one to send back to the portal (default: the "overlay" branded one).
+prefer = (env("KF_OUTPUT_PREFER", "overlay") or "overlay").lower()
+chosen = None
+for name, base, f in produced:
+    if prefer in (name + " " + base).lower():
+        chosen = f
+        break
+if not chosen and produced:
+    chosen = produced[0][2]
 
 out_path = env("KF_OUTPUT")
-chosen = finished_output()
 if chosen:
     print("KF: returning finished image:", chosen)
     img = bpy.data.images.load(chosen, check_existing=False)
@@ -221,4 +224,21 @@ if chosen:
 else:
     print("KF: no compositor output found - returning raw render result")
     bpy.data.images["Render Result"].save_render(filepath=out_path)
+
+# 7. Archive each produced file under a unique name so a new render never
+#    overwrites the previous one on disk (the .blend always writes "Image0001").
+stamp = time.strftime("%Y%m%d-%H%M%S")
+label = slugify(env("KF_LABEL", "")) or "render"
+jobid = (env("KF_JOB_ID", "") or "")[:6]
+tag = "_".join(x for x in [label, stamp, jobid] if x)
+for name, base, f in produced:
+    ext = os.path.splitext(f)[1]
+    dest = os.path.join(os.path.dirname(f), tag + ext)
+    if os.path.abspath(dest) != os.path.abspath(f):
+        try:
+            os.replace(f, dest)
+            print("KF: archived", name, "->", dest)
+        except OSError as e:
+            print("KF: could not archive", f, "-", e)
+
 print("KF_RENDER_OK")
