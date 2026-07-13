@@ -2,6 +2,7 @@
 // The app holds the whole database in memory as `db` and re-renders from it;
 // `syncDb` diffs the previous and next states and pushes only what changed.
 import { supabase } from "./supabase";
+import { allowedTables } from "./access";
 
 export const DEFAULT_SETTINGS = {
   currency: "GBP",
@@ -91,50 +92,63 @@ async function fetchAll(table, { select = "data", order } = {}) {
   return rows;
 }
 
-export async function fetchDb() {
-  const [profiles, orders, productCosts, fixedCosts, tasks, settingsRow] = await Promise.all([
+export async function fetchDb(currentUserId) {
+  // profiles + settings always load; from the current user's access we decide
+  // which data tables to fetch at all, so a limited user's browser never even
+  // downloads restricted data.
+  const [profiles, settingsRow] = await Promise.all([
     fetchAll("profiles", { select: "*", order: { column: "created_at", ascending: true } }),
-    fetchAll("orders", { select: "data", order: { column: "order_date", ascending: false } }),
-    fetchAll("product_costs"),
-    fetchAll("fixed_costs"),
-    fetchAll("tasks"),
     must(supabase.from("app_settings").select("data").eq("id", 1).maybeSingle()),
   ]);
-  // monthly_figures was added later — tolerate the table not existing yet so
-  // the rest of the app keeps working; the page shows migration instructions.
+  const users = profiles.map((p) => ({ id: p.id, name: p.name, email: p.email, role: p.role, badges: p.badges || [], access: p.access || null, createdAt: p.created_at }));
+  const me = users.find((u) => u.id === currentUserId) || null;
+  const tables = allowedTables(me); // null = allowed everything
+  const may = (t) => tables === null || tables.has(t);
+
+  const [orders, productCosts, fixedCosts, tasks] = await Promise.all([
+    may("orders") ? fetchAll("orders", { select: "data", order: { column: "order_date", ascending: false } }) : Promise.resolve([]),
+    may("product_costs") ? fetchAll("product_costs") : Promise.resolve([]),
+    may("fixed_costs") ? fetchAll("fixed_costs") : Promise.resolve([]),
+    may("tasks") ? fetchAll("tasks") : Promise.resolve([]),
+  ]);
+
   let monthlyFigures = [];
   let monthlyFiguresReady = true;
-  try {
-    const rows = await fetchAll("monthly_figures");
-    monthlyFigures = rows.map((r) => r.data).sort((a, b) => (b.id || "").localeCompare(a.id || ""));
-  } catch (e) {
-    monthlyFiguresReady = false;
+  if (may("monthly_figures")) {
+    try {
+      const rows = await fetchAll("monthly_figures");
+      monthlyFigures = rows.map((r) => r.data).sort((a, b) => (b.id || "").localeCompare(a.id || ""));
+    } catch (e) {
+      monthlyFiguresReady = false;
+    }
   }
 
-  // commissions was added later too — tolerate the table not existing yet
   let commissions = [];
   let commissionsReady = true;
-  try {
-    const rows = await fetchAll("commissions");
-    commissions = rows.map((r) => r.data).sort((a, b) => (b.requestedAt || "").localeCompare(a.requestedAt || ""));
-  } catch (e) {
-    commissionsReady = false;
+  if (may("commissions")) {
+    try {
+      const rows = await fetchAll("commissions");
+      commissions = rows.map((r) => r.data).sort((a, b) => (b.requestedAt || "").localeCompare(a.requestedAt || ""));
+    } catch (e) {
+      commissionsReady = false;
+    }
   }
 
-  // raffles / competitions — added later; tolerate the tables not existing yet
   let competitions = [];
   let raffleEntries = [];
   let rafflesReady = true;
-  try {
-    const [cs, es] = await Promise.all([fetchAll("competitions"), fetchAll("raffle_entries")]);
-    competitions = cs.map((r) => r.data).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-    raffleEntries = es.map((r) => r.data);
-  } catch (e) {
-    rafflesReady = false;
+  if (may("competitions") || may("raffle_entries")) {
+    try {
+      const [cs, es] = await Promise.all([fetchAll("competitions"), fetchAll("raffle_entries")]);
+      competitions = cs.map((r) => r.data).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+      raffleEntries = es.map((r) => r.data);
+    } catch (e) {
+      rafflesReady = false;
+    }
   }
 
   return {
-    users: profiles.map((p) => ({ id: p.id, name: p.name, email: p.email, role: p.role, badges: p.badges || [], createdAt: p.created_at })),
+    users,
     orders: orders.map((r) => r.data),
     productCosts: productCosts.map((r) => r.data),
     fixedCosts: fixedCosts.map((r) => r.data),
@@ -181,6 +195,7 @@ export async function syncDb(prev, next) {
       const patch = {};
       if (p.role !== u.role) patch.role = u.role;
       if (JSON.stringify(p.badges || []) !== JSON.stringify(u.badges || [])) patch.badges = u.badges || [];
+      if (JSON.stringify(p.access || null) !== JSON.stringify(u.access || null)) patch.access = u.access || null;
       if (Object.keys(patch).length) jobs.push(must(supabase.from("profiles").update(patch).eq("id", u.id)));
     }
   }

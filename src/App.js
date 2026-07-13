@@ -12,6 +12,7 @@ import CommissionsPage from "./components/CommissionsPage";
 import RafflesPage from "./components/RafflesPage";
 import TasksPage from "./components/TasksPage";
 import { RoleBadges } from "./components/badges";
+import { allowedPages } from "./lib/access";
 import TeamPage from "./components/TeamPage";
 import SettingsPage from "./components/SettingsPage";
 
@@ -109,14 +110,14 @@ export default function App() {
 
   const refetch = useCallback(async () => {
     try {
-      const fresh = await fetchDb();
+      const fresh = await fetchDb(session && session.user ? session.user.id : null);
       dbRef.current = fresh;
       setDbState(fresh);
       setLoadErr(null);
     } catch (e) {
       setLoadErr(e.message || String(e));
     }
-  }, []);
+  }, [session]);
 
   useEffect(() => {
     if (session) {
@@ -197,7 +198,16 @@ export default function App() {
     settings: <SettingsPage db={db} update={update} user={user} refetch={refetch} />,
   };
 
-  const currentLabel = (NAV.find((n) => n.key === pageKey) || {}).label || "KantoForge HQ";
+  const allowed = allowedPages(user);
+  // hide section headers whose items are all disallowed
+  const visibleNav = NAV.filter((item, i) => {
+    if (!item.section) return allowed.includes(item.key);
+    // keep a section header only if a following page (before the next section) is allowed
+    for (let j = i + 1; j < NAV.length && !NAV[j].section; j++) if (allowed.includes(NAV[j].key)) return true;
+    return false;
+  });
+  const activeKey = allowed.includes(pageKey) ? pageKey : allowed[0];
+  const currentLabel = (NAV.find((n) => n.key === activeKey) || {}).label || "KantoForge HQ";
 
   return (
     <div className="shell">
@@ -206,13 +216,13 @@ export default function App() {
         <div className="brand">
           <img src={logo} alt="KantoForge HQ" />
         </div>
-        {NAV.map((item, i) =>
+        {visibleNav.map((item, i) =>
           item.section ? (
             <div className="nav-section" key={"s" + i}>{item.section}</div>
           ) : (
             <button
               key={item.key}
-              className={"nav-item" + (pageKey === item.key ? " active" : "")}
+              className={"nav-item" + (activeKey === item.key ? " active" : "")}
               onClick={() => { setPageKey(item.key); setNavOpen(false); }}
             >
               <Icon name={item.icon} />
@@ -252,7 +262,7 @@ export default function App() {
               </span>
             </div>
           )}
-          {pages[pageKey]}
+          {pages[activeKey]}
         </main>
       </div>
     </div>
