@@ -88,8 +88,15 @@ export default function BlenderRenderPanel({ user }) {
   };
 
   const view = async (id) => {
-    const { data } = await supabase.from("render_jobs").select("result_image").eq("id", id).maybeSingle();
-    if (data && data.result_image) setViewing({ id, result: data.result_image });
+    setErr(null);
+    setViewing({ id, result: null });
+    const { data, error } = await supabase.from("render_jobs").select("result_image").eq("id", id).maybeSingle();
+    if (error || !data || !data.result_image) {
+      setViewing(null);
+      setErr(error ? error.message : "That render has no image saved yet — it may still be rendering or have failed.");
+      return;
+    }
+    setViewing({ id, result: data.result_image });
   };
   const download = (result) => { const a = document.createElement("a"); a.href = result; a.download = "kantoforge-render.png"; a.click(); };
   const remove = async (id) => { await supabase.from("render_jobs").delete().eq("id", id); fetchJobs(); };
@@ -165,10 +172,12 @@ export default function BlenderRenderPanel({ user }) {
 
       {viewing && (
         <div className="lightbox" onClick={() => setViewing(null)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
-            <img src={viewing.result} alt="render" />
+          <div onClick={(e) => e.stopPropagation()} style={{ textAlign: "center", maxWidth: "92vw" }}>
+            {viewing.result
+              ? <img src={viewing.result} alt="render" style={{ maxWidth: "90vw", maxHeight: "78vh", objectFit: "contain", borderRadius: 6 }} />
+              : <div className="muted" style={{ padding: 40 }}>Loading render…</div>}
             <div className="row mt" style={{ justifyContent: "center" }}>
-              <button className="btn primary" onClick={() => download(viewing.result)}>⬇ Download PNG</button>
+              {viewing.result && <button className="btn primary" onClick={() => download(viewing.result)}>⬇ Download PNG</button>}
               <button className="btn" onClick={() => setViewing(null)}>Close</button>
             </div>
           </div>
