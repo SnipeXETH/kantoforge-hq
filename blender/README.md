@@ -30,27 +30,43 @@ Portal (queue a job)  ──►  Supabase  ──►  this agent on your PC  ─
 4. **Check Blender runs from a terminal:** `blender --version`. If not, set the
    full path in `BLENDER_PATH`.
 
-## Running it
+## Running it (one-click)
 
-In this folder:
+You don't need to touch a terminal. In this folder:
 
-```
-python kf_render_agent.py
-```
+- **Windows:** double-click **`start-agent.bat`**
+- **macOS / Linux:** double-click **`start-agent.command`**
+  (first time only, make it runnable: `chmod +x start-agent.command`)
 
-Leave that window open. It prints a line each time it renders a job. Now, in the
-portal, go to **Studio → Product images → 3D render (Blender)**, upload a card +
-artwork, and press **Queue render** — the agent picks it up, renders, and the
-finished image appears in the portal to download.
+A window opens and stays open — leave it open while you want renders to be
+processed. It checks Python and your `.env` are set up, then prints a line each
+time it renders a job. Close the window (or Ctrl+C) to stop.
 
-Only Python 3.8+ is needed — no `pip install` required.
+Prefer the terminal? `python kf_render_agent.py` from this folder does the same
+thing. Only Python 3.8+ is needed — no `pip install` required.
+
+Now, in the portal, go to **Studio → Product images → 3D render (Blender)**,
+upload a card + artwork, and press **Queue render** — the agent picks it up,
+renders, and the finished image appears in the portal to download. Jobs queue
+safely: if the agent isn't running they just wait until it is.
+
+## Start it automatically on login
+
+So you never have to remember to launch it:
+
+- **Windows:** press `Win+R`, type `shell:startup`, Enter, and drop a shortcut
+  to `start-agent.bat` into that folder. It'll launch each time you log in.
+  (For headless/always-on: Task Scheduler → Create Task → trigger **At log on**,
+  action = start `kf_render_agent.py`, tick "Run whether user is logged on or
+  not".)
+- **macOS:** System Settings → General → **Login Items** → **+** → add
+  `start-agent.command`.
+- **Linux:** add a `.desktop` entry to `~/.config/autostart/`, or run it as a
+  `systemd --user` service.
 
 ## Tips
 
 - Keep the render fast by staying in **Eevee** in your `.blend`.
-- To render automatically whenever your PC is on, set the agent to run on login
-  (Windows: Task Scheduler → "At log on"; macOS/Linux: a login item / systemd
-  user service).
 - The agent uses the service-role key, which bypasses database security — only
   run it on a machine you control, and never commit your `.env`.
 - Set output resolution in the portal; it's passed to Blender per job.
