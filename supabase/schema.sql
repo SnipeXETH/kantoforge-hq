@@ -10,6 +10,7 @@ create table public.profiles (
   email text not null default '',
   role text not null default 'member' check (role in ('admin', 'member')),
   badges jsonb not null default '[]'::jsonb,
+  access jsonb,
   created_at timestamptz not null default now()
 );
 
