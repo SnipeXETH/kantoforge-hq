@@ -106,9 +106,9 @@ for img in bpy.data.images:
     except Exception:
         pass
 if missing:
-    print("KF: WARNING — these images did not load (render may look wrong):")
+    print("KF: WARNING - these images did not load (render may look wrong):")
     for name, path in missing:
-        print("   -", name, "->", path)
+        print("KF:   -", name, "->", path)
 
 # 4. Output settings.
 r = scene.render
@@ -161,7 +161,64 @@ def configure_gpu():
 
 configure_gpu()
 
-# 5. Render the current frame and save it exactly where the agent asked.
+# 5. Render the current frame. This also runs the .blend's compositor, which
+#    writes its own File Output nodes (e.g. Renders_Normal / Renders_Overlayed).
 bpy.ops.render.render()
-bpy.data.images["Render Result"].save_render(filepath=env("KF_OUTPUT"))
+
+
+# 6. Return the .blend's finished composited image, not the raw render buffer.
+#    This file overlays KantoForge branding via a compositor "Overlayed" output;
+#    that branded image is the real deliverable. KF_OUTPUT_PREFER picks which
+#    File Output to use when there are several (default: the "overlay" one).
+def newest_image_in(folder):
+    exts = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".exr")
+    best, best_m = None, -1
+    if folder and os.path.isdir(folder):
+        for root, _dirs, files in os.walk(folder):
+            for fn in files:
+                if fn.lower().endswith(exts):
+                    p = os.path.join(root, fn)
+                    try:
+                        m = os.path.getmtime(p)
+                    except OSError:
+                        continue
+                    if m > best_m:
+                        best, best_m = p, m
+    return best
+
+
+def finished_output():
+    prefer = (env("KF_OUTPUT_PREFER", "overlay") or "overlay").lower()
+    nodes = []
+    if scene.use_nodes and scene.node_tree:
+        for node in scene.node_tree.nodes:
+            if node.type == "OUTPUT_FILE":
+                nodes.append((node.name, bpy.path.abspath(node.base_path)))
+    if nodes:
+        print("KF: compositor File Output folders:", [n[0] for n in nodes])
+    # prefer a node whose name or folder matches the preference (e.g. "overlay")
+    for name, base in nodes:
+        if prefer in (name + " " + base).lower():
+            img = newest_image_in(base)
+            if img:
+                return img
+    # otherwise the newest image any File Output produced
+    for name, base in nodes:
+        img = newest_image_in(base)
+        if img:
+            return img
+    return None
+
+
+out_path = env("KF_OUTPUT")
+chosen = finished_output()
+if chosen:
+    print("KF: returning finished image:", chosen)
+    img = bpy.data.images.load(chosen, check_existing=False)
+    img.filepath_raw = out_path
+    img.file_format = "PNG"
+    img.save()
+else:
+    print("KF: no compositor output found - returning raw render result")
+    bpy.data.images["Render Result"].save_render(filepath=out_path)
 print("KF_RENDER_OK")
