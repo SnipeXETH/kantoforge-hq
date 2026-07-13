@@ -4,13 +4,13 @@
 
 export const ALL_PAGES = [
   "dashboard", "analytics", "monthly", "orders", "costs", "pricing",
-  "commissions", "raffles", "tasks", "team", "settings",
+  "commissions", "studio", "raffles", "tasks", "team", "settings",
 ];
 
 export const PAGE_LABELS = {
   dashboard: "Dashboard", analytics: "Analytics", monthly: "Monthly figures",
   orders: "Orders", costs: "Costs", pricing: "Pricing calculator",
-  commissions: "Commissions", raffles: "Competitions", tasks: "Tasks",
+  commissions: "Commissions", studio: "Product images", raffles: "Competitions", tasks: "Tasks",
   team: "Team", settings: "Settings",
 };
 
@@ -24,6 +24,7 @@ export const PAGE_TABLES = {
   costs: ["orders", "product_costs", "fixed_costs"],
   pricing: [],
   commissions: ["commissions"],
+  studio: [],
   raffles: ["competitions", "raffle_entries"],
   tasks: ["tasks"],
   team: [],

@@ -9,6 +9,7 @@ import AnalyticsPage from "./components/AnalyticsPage";
 import PricingPage from "./components/PricingPage";
 import MonthlyPage from "./components/MonthlyPage";
 import CommissionsPage from "./components/CommissionsPage";
+import ProductStudio from "./components/ProductStudio";
 import RafflesPage from "./components/RafflesPage";
 import TasksPage from "./components/TasksPage";
 import { RoleBadges } from "./components/badges";
@@ -25,6 +26,7 @@ const icons = {
   analytics: <path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z" />,
   monthly: <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zM5 8V6h14v2H5zm4 6H7v-2h2v2zm4 0h-2v-2h2v2zm4 0h-2v-2h2v2zm-8 4H7v-2h2v2zm4 0h-2v-2h2v2z" />,
   commissions: <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c1.38 0 2.5-1.12 2.5-2.5 0-.61-.23-1.16-.64-1.58a.68.68 0 0 1-.19-.47c0-.38.31-.69.69-.69H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 8 6.5 8 8 8.67 8 9.5 7.33 11 6.5 11zm3-4C8.67 7 8 6.33 8 5.5S8.67 4 9.5 4s1.5.67 1.5 1.5S10.33 7 9.5 7zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 4 14.5 4s1.5.67 1.5 1.5S15.33 7 14.5 7zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 8 17.5 8s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />,
+  studio: <path d="M21 3H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H3V5h18v14zM8 11l-3 4h14l-4.5-6-3.5 4.5L8 11z" />,
   raffles: <path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2-1.46c-1.19.69-2 1.99-2 3.46s.81 2.77 2 3.46V18H4v-2.54c1.19-.69 2-1.99 2-3.46 0-1.48-.8-2.77-1.99-3.46L4 6h16v2.54z" />,
   pricing: <path d="M12.79 21 3 11.21v2c0 .53.21 1.04.59 1.41l7.79 7.79c.78.78 2.05.78 2.83 0l6.21-6.21c.78-.78.78-2.05 0-2.83L12.79 21zM11.38 17.41c.39.39.9.59 1.41.59.51 0 1.02-.2 1.41-.59l6.21-6.21c.78-.78.78-2.05 0-2.83L12.62.58C12.25.21 11.74 0 11.21 0H5c-1.1 0-2 .9-2 2v6.21c0 .53.21 1.04.59 1.41l7.79 7.79zM7.25 3a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5z" />,
   tasks: <path d="M22 5.18 10.59 16.6l-4.24-4.24 1.41-1.41 2.83 2.83 10-10L22 5.18zM19.79 10.22c.13.57.21 1.17.21 1.78 0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8c1.58 0 3.04.46 4.28 1.25l1.44-1.44A9.9 9.9 0 0 0 12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10c0-1.19-.22-2.33-.6-3.39l-1.61 1.61z" />,
@@ -51,6 +53,7 @@ const NAV = [
   { key: "pricing", label: "Pricing calculator", icon: "pricing" },
   { section: "Studio" },
   { key: "commissions", label: "Commissions", icon: "commissions" },
+  { key: "studio", label: "Product images", icon: "studio" },
   { section: "Raffles" },
   { key: "raffles", label: "Competitions", icon: "raffles" },
   { section: "Team" },
@@ -189,6 +192,7 @@ export default function App() {
     analytics: <AnalyticsPage db={db} />,
     monthly: <MonthlyPage db={db} update={update} user={user} />,
     commissions: <CommissionsPage db={db} update={update} user={user} />,
+    studio: <ProductStudio db={db} update={update} user={user} />,
     raffles: <RafflesPage db={db} update={update} user={user} />,
     orders: <OrdersPage db={db} update={update} refetch={refetch} />,
     costs: <CostsPage db={db} update={update} />,
