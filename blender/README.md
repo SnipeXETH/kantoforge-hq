@@ -8,26 +8,37 @@ glass, lighting), no render farm.
 Portal (queue a job)  ──►  Supabase  ──►  this agent on your PC  ──►  Blender renders  ──►  result back to the portal
 ```
 
+## How it fits your .blend
+
+The magnetic-case file renders the **card** and **background** as image
+*sequences* read from two folders next to the `.blend`:
+
+```
+magnetic_case_BGCROP_rf.blend
+Artwork/Cards/1.png        ← the card
+Artwork/Backgrounds/1.png  ← the background
+textures/
+```
+
+Rendering frame 1 uses `1.png` in each folder (frame 2 → `2.png`, and so on — the
+file is set up for up to 13 variations). The agent just writes each job's card +
+background into the `1` slot and renders frame 1 — exactly the manual process,
+automated. It finds those folders itself, so there's nothing to name or wire up.
+It renders in **Cycles** at 1920×1920.
+
 ## One-time setup
 
 1. **Run the database step** (once): Supabase → SQL Editor → run
    `supabase/migrations/2026-07-render-queue.sql`.
 
-2. **Find your two image names.** Open your `.blend` in Blender. In the Outliner
-   switch the mode dropdown (top-left of the Outliner) to **Blender File** and
-   expand **Images** — note the datablock name for the **card** and for the
-   **background artwork** (e.g. `card_placeholder.png`, `art_placeholder.png`).
-   These are the images the agent will replace each render.
-
-3. **Configure the agent.** In this `blender/` folder, copy `.env.example` to
+2. **Configure the agent.** In this `blender/` folder, copy `.env.example` to
    `.env` and fill in:
    - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API —
      the **service_role** key; it's secret, keep it on your PC only)
    - `BLENDER_PATH` (only if `blender` isn't already on your PATH)
    - `KF_TEMPLATE` — full path to your `.blend`
-   - `KF_CARD_IMG_NAME` / `KF_ART_IMG_NAME` — the two names from step 2
 
-4. **Check Blender runs from a terminal:** `blender --version`. If not, set the
+3. **Check Blender runs from a terminal:** `blender --version`. If not, set the
    full path in `BLENDER_PATH`.
 
 ## Running it (one-click)
@@ -66,7 +77,12 @@ So you never have to remember to launch it:
 
 ## Tips
 
-- Keep the render fast by staying in **Eevee** in your `.blend`.
+- This file renders in **Cycles**, so each image takes longer than Eevee would.
+  To trade some quality for speed, set `KF_SAMPLES` in `.env` (e.g. `128`).
+- If a render comes out missing the marble/metal surfaces, the case textures
+  didn't load — the agent's log prints which images failed. Fix is usually to
+  repoint them at the local `textures/` folder or pack them into the `.blend`
+  (File → External Data → Pack Resources).
 - The agent uses the service-role key, which bypasses database security — only
   run it on a machine you control, and never commit your `.env`.
 - Set output resolution in the portal; it's passed to Blender per job.

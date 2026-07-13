@@ -45,8 +45,6 @@ SUPABASE_URL = need("SUPABASE_URL").rstrip("/")
 SERVICE_KEY = need("SUPABASE_SERVICE_ROLE_KEY")
 BLENDER = os.environ.get("BLENDER_PATH", "blender")
 TEMPLATE = need("KF_TEMPLATE")
-CARD_IMG_NAME = need("KF_CARD_IMG_NAME")
-ART_IMG_NAME = need("KF_ART_IMG_NAME")
 POLL = int(os.environ.get("KF_POLL_SECONDS", "5"))
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "render_job.py")
 
@@ -94,8 +92,6 @@ def render(job, workdir):
     write_dataurl(job["art_image"], art)
     env = dict(os.environ)
     env.update({
-        "KF_CARD_IMG_NAME": CARD_IMG_NAME,
-        "KF_ART_IMG_NAME": ART_IMG_NAME,
         "KF_CARD_FILE": card,
         "KF_ART_FILE": art,
         "KF_OUTPUT": out,
