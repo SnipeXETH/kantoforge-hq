@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { composite, DEFAULT_TEMPLATE } from "../lib/composite";
+import BlenderRenderPanel from "./BlenderRenderPanel";
 
 function readFile(file) {
   return new Promise((resolve, reject) => {
@@ -39,6 +40,7 @@ export default function ProductStudio({ db, update, user }) {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  const [tool, setTool] = useState("composite"); // "composite" | "render"
   const previewRef = useRef(null);
   const dragRef = useRef(null);
 
@@ -116,10 +118,17 @@ export default function ProductStudio({ db, update, user }) {
       <div className="page-head">
         <div>
           <h1>Product image studio</h1>
-          <div className="sub">Composite the extended artwork + card into the case template — instant, no render farm.</div>
+          <div className="sub">Turn artwork + card into product images — a fast 2D composite, or a full Blender render via your PC.</div>
+        </div>
+        <div className="pills">
+          <button className={tool === "composite" ? "active" : ""} onClick={() => setTool("composite")}>2D composite</button>
+          <button className={tool === "render" ? "active" : ""} onClick={() => setTool("render")}>3D render (Blender)</button>
         </div>
       </div>
 
+      {tool === "render" && <BlenderRenderPanel user={user} />}
+      {tool === "render" ? null : (
+      <>
       {msg && <div className="notice good mb">✅ {msg}</div>}
       {!overlay && (
         <div className="notice mb">
@@ -209,6 +218,8 @@ export default function ProductStudio({ db, update, user }) {
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
