@@ -31,6 +31,27 @@ export const PAGE_TABLES = {
   settings: [],
 };
 
+// Sections mirror the sidebar. Team + Settings are admin-only and never
+// assignable to a member here (make someone an admin to grant those).
+export const PAGE_SECTIONS = [
+  { title: "Overview", pages: ["dashboard"] },
+  { title: "Financials", pages: ["monthly", "analytics", "orders", "costs", "pricing"] },
+  { title: "Studio", pages: ["commissions", "studio"] },
+  { title: "Raffles", pages: ["raffles"] },
+  { title: "Team", pages: ["tasks"] },
+];
+
+export const ADMIN_ONLY_PAGES = ["team", "settings"];
+export const ASSIGNABLE_PAGES = PAGE_SECTIONS.reduce((a, s) => a.concat(s.pages), []);
+
+// Quick presets for common roles on the team.
+export const ACCESS_PRESETS = [
+  { key: "ops", label: "Operations", pages: ["dashboard", "orders", "commissions", "tasks"] },
+  { key: "finance", label: "Finance", pages: ["dashboard", "monthly", "analytics", "orders", "costs", "pricing"] },
+  { key: "artist", label: "Artist", pages: ["commissions", "studio"] },
+  { key: "commissions", label: "Commissions only", pages: ["commissions"] },
+];
+
 export function allowedPages(user) {
   if (!user) return [];
   if (user.role === "admin") return ALL_PAGES;

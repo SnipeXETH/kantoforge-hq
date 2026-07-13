@@ -2,7 +2,99 @@ import React, { useState } from "react";
 import { supabase } from "../lib/supabase";
 import { shortDate } from "../lib/format";
 import { RoleBadges, BADGE_OPTIONS, BADGE_COLORS } from "./badges";
-import { ALL_PAGES, PAGE_LABELS, allowedPages, isLimited } from "../lib/access";
+import {
+  PAGE_LABELS, PAGE_SECTIONS, ADMIN_ONLY_PAGES, ASSIGNABLE_PAGES, ACCESS_PRESETS,
+  allowedPages, isLimited,
+} from "../lib/access";
+
+function sameSet(a, b) {
+  if (a.length !== b.length) return false;
+  const s = new Set(a);
+  return b.every((x) => s.has(x));
+}
+
+// Full-screen per-user access editor, grouped like the sidebar.
+function AccessModal({ u, update, onClose }) {
+  const custom = isLimited(u);
+  const chosen = custom && u.access ? (u.access.pages || []) : [];
+  const first = (u.name || "they").split(" ")[0];
+
+  const setAccess = (access) =>
+    update((d) => ({ ...d, users: d.users.map((x) => (x.id === u.id ? { ...x, access } : x)) }));
+
+  const setFull = () => setAccess(null);
+  const setCustom = (pages) => setAccess({ mode: "limited", pages: Array.from(new Set(pages)) });
+  const toCustom = () => setCustom(ASSIGNABLE_PAGES); // switching to custom starts with everything on
+  const togglePage = (p) => setCustom(chosen.includes(p) ? chosen.filter((x) => x !== p) : [...chosen, p]);
+  const setGroup = (pages, on) =>
+    setCustom(on ? [...chosen, ...pages] : chosen.filter((p) => !pages.includes(p)));
+
+  const activePreset = ACCESS_PRESETS.find((pr) => custom && sameSet(pr.pages, chosen));
+  const willSee = custom ? allowedPages(u) : null;
+
+  return (
+    <div className="lightbox" onClick={onClose}>
+      <div className="card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 620, width: "100%", maxHeight: "88vh", overflowY: "auto", textAlign: "left", margin: 0 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h2 style={{ margin: 0 }}>Access · {u.name}</h2>
+          <button className="btn small" onClick={onClose}>Done</button>
+        </div>
+        <div className="card-sub mt">Choose exactly which parts of the portal {first} can open. Changes save instantly.</div>
+
+        <div className="pills mt mb">
+          <button className={!custom ? "active" : ""} onClick={setFull}>Full access</button>
+          <button className={custom ? "active" : ""} onClick={() => (custom ? null : toCustom())}>Custom</button>
+        </div>
+
+        {custom && (
+          <>
+            <div className="card-sub">Quick presets</div>
+            <div className="pills mb" style={{ flexWrap: "wrap" }}>
+              {ACCESS_PRESETS.map((pr) => (
+                <button key={pr.key} className={activePreset && activePreset.key === pr.key ? "active" : ""} onClick={() => setCustom(pr.pages)}>{pr.label}</button>
+              ))}
+              <button onClick={() => setCustom(ASSIGNABLE_PAGES)}>Everything</button>
+            </div>
+
+            {PAGE_SECTIONS.map((sec) => {
+              const onCount = sec.pages.filter((p) => chosen.includes(p)).length;
+              const allOn = onCount === sec.pages.length;
+              return (
+                <div key={sec.title} className="access-group" style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 10 }}>
+                  <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                    <b style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--text-3)" }}>{sec.title}</b>
+                    <button className="btn small" onClick={() => setGroup(sec.pages, !allOn)}>{allOn ? "Clear" : "All"}</button>
+                  </div>
+                  <div style={{ marginTop: 6 }}>
+                    {sec.pages.map((p) => {
+                      const on = chosen.includes(p);
+                      return (
+                        <label key={p} className="access-row" style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 2px", cursor: "pointer" }}>
+                          <input type="checkbox" checked={on} onChange={() => togglePage(p)} />
+                          <span style={{ color: on ? "var(--text)" : "var(--text-3)" }}>{PAGE_LABELS[p]}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+            <div className="notice mt small">
+              {first} will see: <b>{willSee.map((p) => PAGE_LABELS[p]).join(", ")}</b>.
+              Data for hidden sections isn't loaded into their browser.
+            </div>
+          </>
+        )}
+
+        <div className="notice mt small" style={{ opacity: 0.85 }}>
+          🔒 <b>{ADMIN_ONLY_PAGES.map((p) => PAGE_LABELS[p]).join(" & ")}</b> stay admin-only — make someone an admin to grant those.
+          {!custom && " A full-access member sees every section."}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function TeamPage({ db, update, user }) {
   const isAdmin = user.role === "admin";
@@ -10,17 +102,6 @@ export default function TeamPage({ db, update, user }) {
   const [err, setErr] = useState(null);
   const [editingAccess, setEditingAccess] = useState(null);
   const appUrl = window.location.origin;
-
-  const setAccess = (target, access) =>
-    update((d) => ({ ...d, users: d.users.map((u) => (u.id === target.id ? { ...u, access } : u)) }));
-
-  const setFull = (target) => setAccess(target, null);
-  const setLimited = (target, pages) => setAccess(target, { mode: "limited", pages });
-  const togglePage = (target, page) => {
-    const cur = target.access && target.access.mode === "limited" ? target.access.pages || [] : [];
-    const next = cur.includes(page) ? cur.filter((p) => p !== page) : [...cur, page];
-    setLimited(target, next);
-  };
 
   const copyInvite = async () => {
     try {
@@ -128,8 +209,8 @@ export default function TeamPage({ db, update, user }) {
                     <td className="num">
                       <span className="row" style={{ justifyContent: "flex-end" }}>
                         {u.role !== "admin" && (
-                          <button className="btn small" onClick={() => setEditingAccess(editingAccess === u.id ? null : u.id)}>
-                            {isLimited(u) ? `Access: limited (${allowedPages(u).length})` : "Access: full"}
+                          <button className="btn small" onClick={() => setEditingAccess(u.id)}>
+                            {isLimited(u) ? `Access: ${allowedPages(u).length} section${allowedPages(u).length === 1 ? "" : "s"}` : "Access: full"}
                           </button>
                         )}
                         <button className="btn small" onClick={() => sendReset(u)}>Reset password</button>
@@ -153,46 +234,7 @@ export default function TeamPage({ db, update, user }) {
       {isAdmin && editingAccess && (() => {
         const u = db.users.find((x) => x.id === editingAccess);
         if (!u || u.role === "admin") return null;
-        const limited = isLimited(u);
-        const pages = allowedPages(u);
-        return (
-          <div className="card mt">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <h2 style={{ margin: 0 }}>Access for {u.name}</h2>
-              <button className="btn small" onClick={() => setEditingAccess(null)}>Done</button>
-            </div>
-            <div className="card-sub mt">Choose which sections {u.name.split(" ")[0]} can see when they log in.</div>
-            <div className="pills mb">
-              <button className={!limited ? "active" : ""} onClick={() => setFull(u)}>Full access</button>
-              <button className={limited ? "active" : ""} onClick={() => setLimited(u, limited ? u.access.pages : ["commissions", "tasks"])}>Limited</button>
-              <button onClick={() => setLimited(u, ["commissions"])}>Preset: Commissions only</button>
-            </div>
-            {limited && (
-              <div className="row" style={{ gap: 8 }}>
-                {ALL_PAGES.filter((p) => p !== "settings" && p !== "team").map((p) => {
-                  const on = pages.includes(p);
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      className="role-badge"
-                      onClick={() => togglePage(u, p)}
-                      style={{ cursor: "pointer", color: on ? "#ffb3b9" : "var(--text-3)", borderColor: on ? "rgba(232,50,63,0.4)" : "var(--border-strong)", background: on ? "rgba(232,50,63,0.12)" : "transparent", fontSize: 12, padding: "4px 10px", opacity: on ? 1 : 0.6 }}
-                    >
-                      {PAGE_LABELS[p]}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {limited && (
-              <div className="notice mt small">
-                {u.name.split(" ")[0]} will only see: <b>{pages.map((p) => PAGE_LABELS[p]).join(", ")}</b>. Restricted data isn't loaded into their browser.
-                Admin, Team and Settings stay admin-only. For a hard database-level lock, ask about the RLS follow-up.
-              </div>
-            )}
-          </div>
-        );
+        return <AccessModal u={u} update={update} onClose={() => setEditingAccess(null)} />;
       })()}
 
       {isAdmin && (
