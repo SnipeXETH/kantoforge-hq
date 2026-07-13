@@ -102,6 +102,20 @@ create table public.competitions (
   updated_at timestamptz not null default now()
 );
 
+create table public.render_jobs (
+  id text primary key,
+  status text not null default 'queued',
+  params jsonb not null default '{}'::jsonb,
+  card_image text,
+  art_image text,
+  result_image text,
+  error text,
+  created_by text,
+  created_by_name text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table public.raffle_entries (
   id text primary key,
   competition_id text,
@@ -126,6 +140,7 @@ alter table public.monthly_figures enable row level security;
 alter table public.commissions enable row level security;
 alter table public.competitions enable row level security;
 alter table public.raffle_entries enable row level security;
+alter table public.render_jobs enable row level security;
 
 create policy "team can read profiles" on public.profiles
   for select to authenticated using (true);
@@ -151,6 +166,8 @@ create policy "team full access" on public.commissions
 create policy "team full access" on public.competitions
   for all to authenticated using (true) with check (true);
 create policy "team full access" on public.raffle_entries
+  for all to authenticated using (true) with check (true);
+create policy "team full access" on public.render_jobs
   for all to authenticated using (true) with check (true);
 
 -- ---------------------------------------------------------------------------
