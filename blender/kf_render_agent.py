@@ -96,12 +96,16 @@ def render(job, workdir):
         "KF_CARD_FILE": card,
         "KF_ART_FILE": art,
         "KF_OUTPUT": out,
+        "KF_JOB_ID": str(job.get("id") or ""),
     })
     params = job.get("params") or {}
     if params.get("resX"):
         env["KF_RES_X"] = str(params["resX"])
     if params.get("resY"):
         env["KF_RES_Y"] = str(params["resY"])
+    label = params.get("cardName") or params.get("label") or ""
+    if label:
+        env["KF_LABEL"] = str(label).rsplit(".", 1)[0]
 
     if not os.path.exists(TEMPLATE):
         raise RuntimeError("KF_TEMPLATE not found: " + TEMPLATE)

@@ -74,7 +74,7 @@ export default function BlenderRenderPanel({ user }) {
     try {
       const { error } = await supabase.from("render_jobs").insert({
         id: uid(), status: "queued", card_image: card, art_image: art,
-        params: { resX: Number(resX) || 2000, resY: Number(resY) || 2000 },
+        params: { resX: Number(resX) || 2000, resY: Number(resY) || 2000, cardName, artName },
         created_by: user.id, created_by_name: user.name,
       });
       if (error) throw new Error(error.message);
