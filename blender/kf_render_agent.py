@@ -17,6 +17,7 @@ import json
 import base64
 import tempfile
 import subprocess
+import collections
 import urllib.request
 import urllib.error
 
@@ -101,9 +102,33 @@ def render(job, workdir):
         env["KF_RES_X"] = str(params["resX"])
     if params.get("resY"):
         env["KF_RES_Y"] = str(params["resY"])
-    proc = subprocess.run([BLENDER, "-b", TEMPLATE, "-P", SCRIPT], env=env, capture_output=True, text=True)
-    if proc.returncode != 0 or "KF_RENDER_OK" not in (proc.stdout or "") or not os.path.exists(out):
-        raise RuntimeError((proc.stderr or proc.stdout or "Blender render failed")[-1800:])
+
+    if not os.path.exists(TEMPLATE):
+        raise RuntimeError("KF_TEMPLATE not found: " + TEMPLATE)
+
+    started = time.time()
+    try:
+        proc = subprocess.Popen(
+            [BLENDER, "-b", TEMPLATE, "-P", SCRIPT], env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("Could not launch Blender at '%s'. Set BLENDER_PATH in .env to your blender.exe." % BLENDER)
+
+    tail = collections.deque(maxlen=40)
+    for line in proc.stdout:
+        line = line.rstrip()
+        tail.append(line)
+        # surface render progress + our own KF lines; stay quiet otherwise
+        if line.startswith("KF") or line.startswith("Fra:") or "Sample" in line or "Saved:" in line:
+            print("   " + line)
+    proc.wait()
+    took = int(time.time() - started)
+
+    full = "\n".join(tail)
+    if proc.returncode != 0 or "KF_RENDER_OK" not in full or not os.path.exists(out):
+        raise RuntimeError((full or "Blender render failed")[-1800:])
+    print("   render took %ds" % took)
     with open(out, "rb") as f:
         return "data:image/png;base64," + base64.b64encode(f.read()).decode()
 
