@@ -84,8 +84,43 @@ r.resolution_percentage = 100
 if env("KF_SAMPLES") and hasattr(scene, "cycles"):
     try:
         scene.cycles.samples = int(env("KF_SAMPLES"))
+        print("KF: sample cap =", scene.cycles.samples)
     except Exception as e:
         print("KF: could not set sample cap -", e)
+
+# 4b. Use the GPU if one is available (headless Blender defaults to CPU).
+#     KF_DEVICE = auto (default, try GPU) | gpu | cpu
+def configure_gpu():
+    want = (env("KF_DEVICE", "auto") or "auto").lower()
+    if want == "cpu" or not hasattr(scene, "cycles"):
+        print("KF: rendering device = CPU")
+        return
+    try:
+        cprefs = bpy.context.preferences.addons["cycles"].preferences
+    except Exception as e:
+        print("KF: no Cycles prefs, using CPU -", e)
+        return
+    for backend in ("OPTIX", "CUDA", "HIP", "ONEAPI", "METAL"):
+        try:
+            cprefs.compute_device_type = backend
+        except Exception:
+            continue
+        try:
+            cprefs.get_devices()
+        except Exception:
+            pass
+        gpus = [d for d in cprefs.devices if d.type == backend]
+        if not gpus:
+            continue
+        for d in cprefs.devices:
+            d.use = (d.type == backend)
+        scene.cycles.device = "GPU"
+        print("KF: rendering device = GPU (%s): %s" % (backend, [d.name for d in gpus]))
+        return
+    scene.cycles.device = "CPU"
+    print("KF: no supported GPU found — rendering device = CPU")
+
+configure_gpu()
 
 # 5. Render the current frame and save it exactly where the agent asked.
 bpy.ops.render.render()
