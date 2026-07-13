@@ -55,6 +55,45 @@ for img in bpy.data.images:
             print("KF: could not reload", img.name, "-", e)
 print("KF: reloaded artwork datablocks:", reloaded)
 
+# 2b. Auto-heal missing textures: this .blend has its case textures baked to a
+#     path from another machine. If an image can't be found, look for a file with
+#     the same name in the local "textures" folder next to the .blend and use it.
+def heal_missing_textures():
+    tex_root = os.path.join(blend_dir, "textures")
+    if not os.path.isdir(tex_root):
+        print("KF: no local 'textures' folder next to the .blend to heal from")
+        return
+    index = {}
+    for root, _dirs, files in os.walk(tex_root):
+        for fn in files:
+            index.setdefault(fn.lower(), os.path.join(root, fn))
+    healed, still = [], []
+    for img in bpy.data.images:
+        if img.source != "FILE":
+            continue
+        ap = bpy.path.abspath(img.filepath or "")
+        if ap and os.path.exists(ap):
+            continue  # already loads fine
+        base = os.path.basename((img.filepath or "").replace("\\", "/"))
+        if not base:
+            continue
+        match = index.get(base.lower())
+        if match:
+            img.filepath = match
+            try:
+                img.reload()
+                healed.append(base)
+            except Exception as e:
+                print("KF: reload failed for", base, "-", e)
+        else:
+            still.append(base)
+    if healed:
+        print("KF: repointed textures to local 'textures' folder:", healed)
+    if still:
+        print("KF: textures not found locally (may be unused):", still)
+
+heal_missing_textures()
+
 # 3. Warn about any image that has no pixels loaded (e.g. missing marble/metal
 #    textures) so a broken first render is easy to diagnose.
 missing = []
