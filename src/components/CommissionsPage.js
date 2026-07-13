@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { supabase } from "../lib/supabase";
 import { uid, shortDate } from "../lib/format";
 import { fileToResizedDataUrl } from "../lib/image";
 import { RoleBadges } from "./badges";
@@ -46,10 +47,13 @@ function CommissionCard({ c, db, user, update }) {
   });
   const [denyReason, setDenyReason] = useState("");
   const [finalLink, setFinalLink] = useState(c.finalLink || "");
+  const [artworkFile, setArtworkFile] = useState(null);
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
+  const [rendering, setRendering] = useState(false);
+  const [renderMsg, setRenderMsg] = useState(null);
   const [err, setErr] = useState(null);
-  const [lightbox, setLightbox] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
 
   const badgesOf = (id) => {
     const u = db.users.find((x) => x.id === id);
@@ -102,10 +106,49 @@ function CommissionCard({ c, db, user, update }) {
 
   const start = () => mutate((x) => ({ ...x, status: "in_progress" }), "Started work");
 
-  const complete = () => {
-    if (!finalLink.trim()) return setErr("Paste the link to the finished design.");
-    mutate((x) => ({ ...x, status: "completed", finalLink: finalLink.trim(), completedAt: new Date().toISOString() }), "Completed · " + finalLink.trim());
-    setAction(null);
+  const complete = async () => {
+    setErr(null);
+    if (!finalLink.trim() && !artworkFile && !c.artworkImage) return setErr("Add the finished artwork — upload the image and/or paste a link.");
+    setBusy(true);
+    try {
+      let artworkImage = c.artworkImage || null;
+      if (artworkFile) artworkImage = await fileToResizedDataUrl(artworkFile, 2000);
+      mutate(
+        (x) => ({ ...x, status: "completed", finalLink: finalLink.trim(), artworkImage, completedAt: new Date().toISOString() }),
+        "Completed" + (finalLink.trim() ? " · " + finalLink.trim() : "") + (artworkImage ? " · artwork attached" : "")
+      );
+      setAction(null);
+      setArtworkFile(null);
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const renderThis = async () => {
+    setErr(null);
+    setRenderMsg(null);
+    if (!c.cardImage || !c.artworkImage) return setErr("Need both the card image and the finished artwork to render.");
+    setRendering(true);
+    try {
+      const { error } = await supabase.from("render_jobs").insert({
+        id: uid(),
+        status: "queued",
+        card_image: c.cardImage,
+        art_image: c.artworkImage,
+        params: { resX: 2000, resY: 2000, cardName: c.cardName || "commission", artName: (c.cardName || "commission") + " background" },
+        created_by: user.id,
+        created_by_name: user.name,
+      });
+      if (error) throw new Error(error.message);
+      setRenderMsg("Queued a render — see Studio → Product images. It processes when your render agent is running.");
+    } catch (e) {
+      const m = e.message || String(e);
+      setErr(/render_jobs/.test(m) && /exist/.test(m) ? "Set up the render queue first — open Studio → Product images to run the one-time SQL." : m);
+    } finally {
+      setRendering(false);
+    }
   };
 
   const reopen = (to) => mutate((x) => ({ ...x, status: to }), "Reopened → " + STATUS[to].label);
@@ -136,9 +179,20 @@ function CommissionCard({ c, db, user, update }) {
         {c.assigneeName && <span>Artist: <Who name={c.assigneeName} badges={badgesOf(c.assigneeId)} /></span>}
       </div>
 
-      {c.cardImage && (
-        <div className="mt">
-          <img src={c.cardImage} alt={c.cardName} className="commission-thumb" onClick={() => setLightbox(true)} title="Click to enlarge" />
+      {(c.cardImage || c.artworkImage) && (
+        <div className="mt row" style={{ gap: 8, flexWrap: "wrap" }}>
+          {c.cardImage && (
+            <figure style={{ margin: 0 }}>
+              <img src={c.cardImage} alt="card" className="commission-thumb" onClick={() => setLightbox(c.cardImage)} title="Card — click to enlarge" />
+              <figcaption className="muted small" style={{ textAlign: "center" }}>Card</figcaption>
+            </figure>
+          )}
+          {c.artworkImage && (
+            <figure style={{ margin: 0 }}>
+              <img src={c.artworkImage} alt="artwork" className="commission-thumb" onClick={() => setLightbox(c.artworkImage)} title="Finished artwork — click to enlarge" />
+              <figcaption className="muted small" style={{ textAlign: "center" }}>Background</figcaption>
+            </figure>
+          )}
         </div>
       )}
 
@@ -150,6 +204,7 @@ function CommissionCard({ c, db, user, update }) {
       )}
 
       {err && <div className="notice bad mt">⚠️ {err}</div>}
+      {renderMsg && <div className="notice good mt">🎬 {renderMsg}</div>}
 
       {/* ---- actions ---- */}
       <div className="mt row">
@@ -161,9 +216,17 @@ function CommissionCard({ c, db, user, update }) {
         )}
         {c.status === "approved" && isArtist && <button className="btn primary small" onClick={start}>Start work</button>}
         {c.status === "in_progress" && isArtist && !action && <button className="btn primary small" onClick={() => setAction("complete")}>Mark complete</button>}
+        {c.status === "completed" && c.cardImage && c.artworkImage && (
+          <button className="btn primary small" onClick={renderThis} disabled={rendering} title="Queue a product render from this card + artwork">
+            {rendering ? "Queuing…" : "🎬 Render this"}
+          </button>
+        )}
         {c.status === "denied" && isAdmin && <button className="btn small" onClick={() => reopen("requested")}>Reopen</button>}
         {c.status === "completed" && isAdmin && <button className="btn small" onClick={() => reopen("in_progress")}>Reopen</button>}
       </div>
+      {c.status === "completed" && !c.artworkImage && isAdmin && (
+        <div className="muted small mt">Tip: Reopen and attach the finished artwork image on completion to enable one-click <b>Render this</b>.</div>
+      )}
 
       {action === "approve" && (
         <div className="notice mt">
@@ -203,11 +266,16 @@ function CommissionCard({ c, db, user, update }) {
       {action === "complete" && (
         <div className="notice mt">
           <label className="field">
-            <span className="lab">Link to finished design</span>
+            <span className="lab">Finished artwork image (for rendering)</span>
+            <input type="file" accept="image/png,image/jpeg" onChange={(e) => setArtworkFile(e.target.files[0])} />
+            <span className="hint">The extended background artwork. Upload it here so the product image can be rendered in one click.</span>
+          </label>
+          <label className="field">
+            <span className="lab">Link to finished design (optional)</span>
             <input type="text" value={finalLink} onChange={(e) => setFinalLink(e.target.value)} placeholder="https://…" />
           </label>
           <div className="row">
-            <button className="btn primary small" onClick={complete}>Submit &amp; complete</button>
+            <button className="btn primary small" onClick={complete} disabled={busy}>{busy ? "Saving…" : "Submit & complete"}</button>
             <button className="btn small" onClick={() => { setAction(null); setErr(null); }}>Cancel</button>
           </div>
         </div>
@@ -232,8 +300,8 @@ function CommissionCard({ c, db, user, update }) {
       </div>
 
       {lightbox && (
-        <div className="lightbox" onClick={() => setLightbox(false)}>
-          <img src={c.cardImage} alt={c.cardName} />
+        <div className="lightbox" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt={c.cardName} />
         </div>
       )}
     </div>
