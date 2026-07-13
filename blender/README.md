@@ -8,49 +8,81 @@ glass, lighting), no render farm.
 Portal (queue a job)  ──►  Supabase  ──►  this agent on your PC  ──►  Blender renders  ──►  result back to the portal
 ```
 
+## How it fits your .blend
+
+The magnetic-case file renders the **card** and **background** as image
+*sequences* read from two folders next to the `.blend`:
+
+```
+magnetic_case_BGCROP_rf.blend
+Artwork/Cards/1.png        ← the card
+Artwork/Backgrounds/1.png  ← the background
+textures/
+```
+
+Rendering frame 1 uses `1.png` in each folder (frame 2 → `2.png`, and so on — the
+file is set up for up to 13 variations). The agent just writes each job's card +
+background into the `1` slot and renders frame 1 — exactly the manual process,
+automated. It finds those folders itself, so there's nothing to name or wire up.
+It renders in **Cycles** at 1920×1920.
+
 ## One-time setup
 
 1. **Run the database step** (once): Supabase → SQL Editor → run
    `supabase/migrations/2026-07-render-queue.sql`.
 
-2. **Find your two image names.** Open your `.blend` in Blender. In the Outliner
-   switch the mode dropdown (top-left of the Outliner) to **Blender File** and
-   expand **Images** — note the datablock name for the **card** and for the
-   **background artwork** (e.g. `card_placeholder.png`, `art_placeholder.png`).
-   These are the images the agent will replace each render.
-
-3. **Configure the agent.** In this `blender/` folder, copy `.env.example` to
+2. **Configure the agent.** In this `blender/` folder, copy `.env.example` to
    `.env` and fill in:
    - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Settings → API —
      the **service_role** key; it's secret, keep it on your PC only)
    - `BLENDER_PATH` (only if `blender` isn't already on your PATH)
    - `KF_TEMPLATE` — full path to your `.blend`
-   - `KF_CARD_IMG_NAME` / `KF_ART_IMG_NAME` — the two names from step 2
 
-4. **Check Blender runs from a terminal:** `blender --version`. If not, set the
+3. **Check Blender runs from a terminal:** `blender --version`. If not, set the
    full path in `BLENDER_PATH`.
 
-## Running it
+## Running it (one-click)
 
-In this folder:
+You don't need to touch a terminal. In this folder:
 
-```
-python kf_render_agent.py
-```
+- **Windows:** double-click **`start-agent.bat`**
+- **macOS / Linux:** double-click **`start-agent.command`**
+  (first time only, make it runnable: `chmod +x start-agent.command`)
 
-Leave that window open. It prints a line each time it renders a job. Now, in the
-portal, go to **Studio → Product images → 3D render (Blender)**, upload a card +
-artwork, and press **Queue render** — the agent picks it up, renders, and the
-finished image appears in the portal to download.
+A window opens and stays open — leave it open while you want renders to be
+processed. It checks Python and your `.env` are set up, then prints a line each
+time it renders a job. Close the window (or Ctrl+C) to stop.
 
-Only Python 3.8+ is needed — no `pip install` required.
+Prefer the terminal? `python kf_render_agent.py` from this folder does the same
+thing. Only Python 3.8+ is needed — no `pip install` required.
+
+Now, in the portal, go to **Studio → Product images → 3D render (Blender)**,
+upload a card + artwork, and press **Queue render** — the agent picks it up,
+renders, and the finished image appears in the portal to download. Jobs queue
+safely: if the agent isn't running they just wait until it is.
+
+## Start it automatically on login
+
+So you never have to remember to launch it:
+
+- **Windows:** press `Win+R`, type `shell:startup`, Enter, and drop a shortcut
+  to `start-agent.bat` into that folder. It'll launch each time you log in.
+  (For headless/always-on: Task Scheduler → Create Task → trigger **At log on**,
+  action = start `kf_render_agent.py`, tick "Run whether user is logged on or
+  not".)
+- **macOS:** System Settings → General → **Login Items** → **+** → add
+  `start-agent.command`.
+- **Linux:** add a `.desktop` entry to `~/.config/autostart/`, or run it as a
+  `systemd --user` service.
 
 ## Tips
 
-- Keep the render fast by staying in **Eevee** in your `.blend`.
-- To render automatically whenever your PC is on, set the agent to run on login
-  (Windows: Task Scheduler → "At log on"; macOS/Linux: a login item / systemd
-  user service).
+- This file renders in **Cycles**, so each image takes longer than Eevee would.
+  To trade some quality for speed, set `KF_SAMPLES` in `.env` (e.g. `128`).
+- If a render comes out missing the marble/metal surfaces, the case textures
+  didn't load — the agent's log prints which images failed. Fix is usually to
+  repoint them at the local `textures/` folder or pack them into the `.blend`
+  (File → External Data → Pack Resources).
 - The agent uses the service-role key, which bypasses database security — only
   run it on a machine you control, and never commit your `.env`.
 - Set output resolution in the portal; it's passed to Blender per job.

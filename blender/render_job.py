@@ -1,44 +1,93 @@
-# Runs INSIDE Blender:  blender -b your-template.blend -P render_job.py
+# Runs INSIDE Blender:  blender -b magnetic_case_BGCROP_rf.blend -P render_job.py
 #
-# Swaps the card and background-artwork images for the ones the agent supplies,
-# then renders a still to the output path. Everything is passed via environment
-# variables (the agent sets them). It swaps by Image *datablock name* — the most
-# reliable method — so you just need the two image names from your .blend.
+# Reproduces the manual KantoForge workflow: drop the card into Artwork/Cards/1.png
+# and the background into Artwork/Backgrounds/1.png, then render frame 1. The card
+# and background are Image *sequences* in the .blend (frame N -> N.png), so writing
+# the "1" slot and rendering frame 1 is exactly what a person does by hand.
 #
-# To find the names: in Blender open the "Blender File" view in the Outliner
-# (top-right dropdown) and expand "Images", or open the Image Editor and look at
-# the image dropdown. Put those two names in the agent's .env.
+# The agent passes everything via environment variables:
+#   KF_CARD_FILE   full path to the card PNG for this job
+#   KF_ART_FILE    full path to the background PNG for this job
+#   KF_OUTPUT      full path to write the finished PNG to
+#   KF_RES_X/Y     (optional) resolution override
+#   KF_SAMPLES     (optional) Cycles sample cap, to trade quality for speed
+#   KF_CARDS_SUBDIR / KF_BG_SUBDIR  (optional) override the folder names
 
 import bpy
 import os
+import shutil
 
 
-def swap(image_name, new_path):
-    img = bpy.data.images.get(image_name)
-    if img is None:
-        names = [i.name for i in bpy.data.images]
-        raise SystemExit(
-            "Image datablock '%s' not found. Available images: %s" % (image_name, names)
-        )
-    img.filepath = new_path
-    img.source = "FILE"
-    img.reload()
+def env(name, default=None):
+    v = os.environ.get(name)
+    return v if v not in (None, "") else default
 
 
-swap(os.environ["KF_CARD_IMG_NAME"], os.environ["KF_CARD_FILE"])
-swap(os.environ["KF_ART_IMG_NAME"], os.environ["KF_ART_FILE"])
+blend_path = bpy.data.filepath
+if not blend_path:
+    raise SystemExit("KF: the .blend has no path on disk — save it first.")
+blend_dir = os.path.dirname(blend_path)
+
+cards_dir = os.path.join(blend_dir, *env("KF_CARDS_SUBDIR", "Artwork/Cards").split("/"))
+bg_dir = os.path.join(blend_dir, *env("KF_BG_SUBDIR", "Artwork/Backgrounds").split("/"))
+os.makedirs(cards_dir, exist_ok=True)
+os.makedirs(bg_dir, exist_ok=True)
+
+# 1. Put this job's images into the "1" slot of each folder (overwrites the slot —
+#    that's the intended use of the queue folders).
+shutil.copyfile(env("KF_CARD_FILE"), os.path.join(cards_dir, "1.png"))
+shutil.copyfile(env("KF_ART_FILE"), os.path.join(bg_dir, "1.png"))
 
 scene = bpy.context.scene
-scene.render.image_settings.file_format = "PNG"
-scene.render.image_settings.color_mode = "RGBA"
-scene.render.filepath = os.environ["KF_OUTPUT"]
+scene.frame_set(1)
 
-# Optional overrides
-if os.environ.get("KF_RES_X"):
-    scene.render.resolution_x = int(os.environ["KF_RES_X"])
-if os.environ.get("KF_RES_Y"):
-    scene.render.resolution_y = int(os.environ["KF_RES_Y"])
-scene.render.resolution_percentage = 100
+# 2. Re-read the card/background sequence datablocks so Blender picks up the files
+#    we just wrote. We match by the relative "//Artwork\Cards|Backgrounds" path,
+#    which selects the real datablocks and skips the stale absolute-path orphan.
+reloaded = []
+for img in bpy.data.images:
+    fp = (img.filepath or "").replace("\\", "/")
+    if fp.startswith("//") and ("Cards" in fp or "Backgrounds" in fp):
+        try:
+            img.reload()
+            reloaded.append(img.name)
+        except Exception as e:
+            print("KF: could not reload", img.name, "-", e)
+print("KF: reloaded artwork datablocks:", reloaded)
 
-bpy.ops.render.render(write_still=True)
+# 3. Warn about any image that has no pixels loaded (e.g. missing marble/metal
+#    textures) so a broken first render is easy to diagnose.
+missing = []
+for img in bpy.data.images:
+    if img.source in ("VIEWER", "GENERATED"):
+        continue
+    try:
+        if img.has_data is False and tuple(img.size) == (0, 0):
+            missing.append((img.name, bpy.path.abspath(img.filepath or "")))
+    except Exception:
+        pass
+if missing:
+    print("KF: WARNING — these images did not load (render may look wrong):")
+    for name, path in missing:
+        print("   -", name, "->", path)
+
+# 4. Output settings.
+r = scene.render
+r.image_settings.file_format = "PNG"
+r.image_settings.color_mode = "RGBA"
+if env("KF_RES_X"):
+    r.resolution_x = int(env("KF_RES_X"))
+if env("KF_RES_Y"):
+    r.resolution_y = int(env("KF_RES_Y"))
+r.resolution_percentage = 100
+
+if env("KF_SAMPLES") and hasattr(scene, "cycles"):
+    try:
+        scene.cycles.samples = int(env("KF_SAMPLES"))
+    except Exception as e:
+        print("KF: could not set sample cap -", e)
+
+# 5. Render the current frame and save it exactly where the agent asked.
+bpy.ops.render.render()
+bpy.data.images["Render Result"].save_render(filepath=env("KF_OUTPUT"))
 print("KF_RENDER_OK")
