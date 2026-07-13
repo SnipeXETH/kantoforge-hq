@@ -18,6 +18,12 @@ const STATUS = {
   failed: { label: "Failed", cls: "red" },
 };
 
+const stripExt = (s) => (s || "").replace(/\.[^.]+$/, "");
+function jobName(j) {
+  const p = j.params || {};
+  return stripExt(p.cardName) || stripExt(p.artName) || p.label || "Untitled render";
+}
+
 const MIGRATION = `create table if not exists public.render_jobs (
   id text primary key, status text not null default 'queued',
   params jsonb not null default '{}'::jsonb,
@@ -47,7 +53,7 @@ export default function BlenderRenderPanel({ user }) {
   const fetchJobs = async () => {
     const { data, error } = await supabase
       .from("render_jobs")
-      .select("id,status,error,created_at,created_by_name")
+      .select("id,status,error,created_at,created_by_name,params")
       .order("created_at", { ascending: false })
       .limit(25);
     if (error) { setReady(false); return; }
@@ -144,14 +150,18 @@ export default function BlenderRenderPanel({ user }) {
           <h3>Render jobs</h3>
           <div className="table-wrap mt">
             <table className="data">
-              <thead><tr><th>When</th><th>By</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Render</th><th>When</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 {(jobs || []).map((j) => {
                   const st = STATUS[j.status] || STATUS.queued;
+                  const name = jobName(j);
                   return (
                     <tr key={j.id}>
+                      <td>
+                        <b style={{ fontWeight: 600 }}>{name}</b>
+                        {j.created_by_name ? <div className="muted small">by {j.created_by_name}</div> : null}
+                      </td>
                       <td className="muted small">{shortDate(j.created_at)}</td>
-                      <td className="small">{j.created_by_name || "—"}</td>
                       <td><span className={"badge " + st.cls}>{st.label}</span>{j.status === "failed" && j.error ? <div className="muted small" style={{ maxWidth: 200 }}>{j.error.slice(0, 120)}</div> : null}</td>
                       <td className="num">
                         <span className="row" style={{ justifyContent: "flex-end" }}>
