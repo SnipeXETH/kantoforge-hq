@@ -134,7 +134,9 @@ def render(job, workdir):
         raise RuntimeError((full or "Blender render failed")[-1800:])
     print("   render took %ds" % took)
     with open(out, "rb") as f:
-        return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+        raw = f.read()
+    mime = "image/jpeg" if raw[:3] == b"\xff\xd8\xff" else "image/png"
+    return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode())
 
 
 def main():

@@ -217,10 +217,7 @@ if not chosen and produced:
 out_path = env("KF_OUTPUT")
 if chosen:
     print("KF: returning finished image:", chosen)
-    img = bpy.data.images.load(chosen, check_existing=False)
-    img.filepath_raw = out_path
-    img.file_format = "PNG"
-    img.save()
+    shutil.copyfile(chosen, out_path)  # already a finished image on disk; copy as-is
 else:
     print("KF: no compositor output found - returning raw render result")
     bpy.data.images["Render Result"].save_render(filepath=out_path)
