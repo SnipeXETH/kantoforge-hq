@@ -124,6 +124,12 @@ create table public.raffle_entries (
 );
 create index raffle_entries_comp on public.raffle_entries (competition_id);
 
+create table public.print_mockups (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 insert into public.app_settings (id, data) values (1, '{}'::jsonb);
 
 -- ---------------------------------------------------------------------------
@@ -141,6 +147,7 @@ alter table public.commissions enable row level security;
 alter table public.competitions enable row level security;
 alter table public.raffle_entries enable row level security;
 alter table public.render_jobs enable row level security;
+alter table public.print_mockups enable row level security;
 
 create policy "team can read profiles" on public.profiles
   for select to authenticated using (true);
@@ -168,6 +175,8 @@ create policy "team full access" on public.competitions
 create policy "team full access" on public.raffle_entries
   for all to authenticated using (true) with check (true);
 create policy "team full access" on public.render_jobs
+  for all to authenticated using (true) with check (true);
+create policy "team full access" on public.print_mockups
   for all to authenticated using (true) with check (true);
 
 -- ---------------------------------------------------------------------------

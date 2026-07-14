@@ -4,15 +4,20 @@
 
 export const ALL_PAGES = [
   "dashboard", "analytics", "monthly", "orders", "costs", "pricing",
-  "commissions", "studio", "raffles", "tasks", "team", "settings",
+  "commissions", "studio", "raffles", "tasks", "printshop", "team", "settings",
 ];
 
 export const PAGE_LABELS = {
   dashboard: "Dashboard", analytics: "Analytics", monthly: "Monthly figures",
   orders: "Orders", costs: "Costs", pricing: "Pricing calculator",
   commissions: "Commissions", studio: "Product images", raffles: "Competitions", tasks: "Tasks",
-  team: "Team", settings: "Settings",
+  printshop: "Print shop", team: "Team", settings: "Settings",
 };
+
+// Private sections: hidden from EVERYONE (including admins) unless a user is
+// explicitly granted access. This is how we lock a section to a named few.
+export const RESTRICTED_PAGES = ["printshop"];
+const isRestricted = (p) => RESTRICTED_PAGES.includes(p);
 
 // Which Supabase tables each page needs — used to minimise what a limited
 // user's browser downloads. profiles + app_settings are always fetched.
@@ -27,6 +32,7 @@ export const PAGE_TABLES = {
   studio: [],
   raffles: ["competitions", "raffle_entries"],
   tasks: ["tasks"],
+  printshop: [], // its mockups live in their own table, fetched by the page
   team: [],
   settings: [],
 };
@@ -52,13 +58,34 @@ export const ACCESS_PRESETS = [
   { key: "commissions", label: "Commissions only", pages: ["commissions"] },
 ];
 
+// Private sections a user has been explicitly granted.
+export function grantsOf(user) {
+  const g = user && user.access && Array.isArray(user.access.grants) ? user.access.grants : [];
+  return g.filter((p) => RESTRICTED_PAGES.includes(p));
+}
+
+export function hasSection(user, page) {
+  return allowedPages(user).includes(page);
+}
+
 export function allowedPages(user) {
   if (!user) return [];
-  if (user.role === "admin") return ALL_PAGES;
-  const a = user.access;
-  if (!a || a.mode !== "limited") return ALL_PAGES; // default = full access
-  const pages = (a.pages || []).filter((p) => ALL_PAGES.includes(p));
-  return pages.length ? pages : ["commissions"]; // never lock a user out entirely
+  const openPages = ALL_PAGES.filter((p) => !isRestricted(p));
+  let base;
+  if (user.role === "admin") {
+    base = openPages;
+  } else {
+    const a = user.access;
+    if (!a || a.mode !== "limited") {
+      base = openPages; // default = full access to the open sections
+    } else {
+      const pages = (a.pages || []).filter((p) => openPages.includes(p));
+      base = pages.length ? pages : ["commissions"]; // never lock a user out entirely
+    }
+  }
+  // add any private sections this user has been granted (applies to admins too)
+  const grants = grantsOf(user).filter((p) => !base.includes(p));
+  return base.concat(grants);
 }
 
 export function isLimited(user) {
