@@ -37,37 +37,116 @@ async function resizeToJpeg(file, maxDim = 1800, quality = 0.9) {
   return c.toDataURL("image/jpeg", quality);
 }
 
-// Drag the four corners of the artwork region over the mockup photo.
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+
+// Precisely place the four corners of the artwork region: drag, zoom, a
+// magnifier loupe, arrow-key nudge, and exact numeric entry.
 function CornerEditor({ image, corners, onChange }) {
   const wrapRef = useRef(null);
-  const [drag, setDrag] = useState(null);
+  const loupeRef = useRef(null);
+  const [imgEl, setImgEl] = useState(null);
+  const [active, setActive] = useState(0);
+  const [drag, setDrag] = useState(false);
+  const [zoom, setZoom] = useState(1);
+
+  useEffect(() => {
+    let ok = true;
+    loadImage(image).then((im) => { if (ok) setImgEl(im); }).catch(() => {});
+    return () => { ok = false; };
+  }, [image]);
+
+  // paint the magnifier around the active corner
+  useEffect(() => {
+    const cv = loupeRef.current;
+    if (!cv || !imgEl) return;
+    const box = cv.width;
+    const natW = imgEl.naturalWidth, natH = imgEl.naturalHeight;
+    const span = Math.max(24, natW * 0.05); // natural px shown across the loupe
+    const cx = corners[active].x * natW, cy = corners[active].y * natH;
+    const g = cv.getContext("2d");
+    g.clearRect(0, 0, box, box);
+    g.drawImage(imgEl, cx - span / 2, cy - span / 2, span, span, 0, 0, box, box);
+    g.strokeStyle = "rgba(232,50,63,0.95)";
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(box / 2, 0); g.lineTo(box / 2, box);
+    g.moveTo(0, box / 2); g.lineTo(box, box / 2);
+    g.stroke();
+  }, [corners, active, imgEl]);
+
+  const setCorner = (i, x, y) => onChange(corners.map((c, idx) => (idx === i ? { x: clamp01(x), y: clamp01(y) } : c)));
+
   const move = (e) => {
-    if (drag == null) return;
+    if (!drag) return;
     const r = wrapRef.current.getBoundingClientRect();
-    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-    const y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
-    onChange(corners.map((c, i) => (i === drag ? { x, y } : c)));
+    setCorner(active, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
   };
+
+  const onKey = (e) => {
+    const step = e.shiftKey ? 0.01 : 0.001;
+    let dx = 0, dy = 0;
+    if (e.key === "ArrowLeft") dx = -step;
+    else if (e.key === "ArrowRight") dx = step;
+    else if (e.key === "ArrowUp") dy = -step;
+    else if (e.key === "ArrowDown") dy = step;
+    else return;
+    e.preventDefault();
+    setCorner(active, corners[active].x + dx, corners[active].y + dy);
+  };
+
   return (
-    <div
-      ref={wrapRef}
-      style={{ position: "relative", touchAction: "none", userSelect: "none", maxWidth: 520, width: "100%" }}
-      onPointerMove={move}
-      onPointerUp={() => setDrag(null)}
-      onPointerLeave={() => setDrag(null)}
-    >
-      <img src={image} alt="mockup" style={{ width: "100%", display: "block", borderRadius: 8 }} draggable={false} />
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
-        <polygon points={corners.map((c) => `${c.x * 100},${c.y * 100}`).join(" ")} fill="rgba(232,50,63,0.14)" stroke="rgba(232,50,63,0.9)" strokeWidth="0.4" />
-      </svg>
-      {corners.map((c, i) => (
+    <div>
+      <div className="row mb" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        <span className="muted small">Corner:</span>
+        {CORNER_LABELS.map((l, i) => (
+          <button key={i} className={"btn small" + (active === i ? " primary" : "")} onClick={() => setActive(i)}>{l}</button>
+        ))}
+      </div>
+      <div className="row mb" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="muted small">Zoom</span>
+        <input type="range" min={1} max={5} step={0.1} value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} style={{ width: 130 }} />
+        <span className="muted small">· click a dot, then arrow keys nudge (Shift = bigger)</span>
+      </div>
+      <div style={{ maxHeight: 480, overflow: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
         <div
-          key={i}
-          onPointerDown={() => setDrag(i)}
-          title={CORNER_LABELS[i]}
-          style={{ position: "absolute", left: `${c.x * 100}%`, top: `${c.y * 100}%`, width: 20, height: 20, marginLeft: -10, marginTop: -10, borderRadius: "50%", background: "#e8323f", border: "2px solid #fff", cursor: "grab", boxShadow: "0 1px 4px rgba(0,0,0,0.5)" }}
-        />
-      ))}
+          ref={wrapRef}
+          tabIndex={0}
+          onKeyDown={onKey}
+          style={{ position: "relative", width: `${zoom * 100}%`, touchAction: "none", userSelect: "none", outline: "none" }}
+          onPointerMove={move}
+          onPointerUp={() => setDrag(false)}
+          onPointerLeave={() => setDrag(false)}
+        >
+          <img src={image} alt="mockup" style={{ width: "100%", display: "block" }} draggable={false} />
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
+            <polygon points={corners.map((c) => `${c.x * 100},${c.y * 100}`).join(" ")} fill="rgba(232,50,63,0.12)" stroke="rgba(232,50,63,0.9)" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
+          </svg>
+          {corners.map((c, i) => (
+            <div
+              key={i}
+              onPointerDown={() => { setActive(i); setDrag(true); wrapRef.current.focus(); }}
+              title={CORNER_LABELS[i]}
+              style={{ position: "absolute", left: `${c.x * 100}%`, top: `${c.y * 100}%`, width: 16, height: 16, marginLeft: -8, marginTop: -8, borderRadius: "50%", background: active === i ? "#fff" : "#e8323f", border: `3px solid ${active === i ? "#e8323f" : "#fff"}`, cursor: "grab", boxShadow: "0 1px 4px rgba(0,0,0,0.5)" }}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="row mt" style={{ gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <canvas ref={loupeRef} width={150} height={150} style={{ width: 150, height: 150, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-2)" }} />
+        <div>
+          <div className="muted small mb">{CORNER_LABELS[active]} — exact position (%)</div>
+          <div className="row" style={{ gap: 8 }}>
+            <label className="field" style={{ width: 96, margin: 0 }}>
+              <span className="lab">X</span>
+              <input type="number" step="0.1" value={(corners[active].x * 100).toFixed(1)} onChange={(e) => setCorner(active, (parseFloat(e.target.value) || 0) / 100, corners[active].y)} />
+            </label>
+            <label className="field" style={{ width: 96, margin: 0 }}>
+              <span className="lab">Y</span>
+              <input type="number" step="0.1" value={(corners[active].y * 100).toFixed(1)} onChange={(e) => setCorner(active, corners[active].x, (parseFloat(e.target.value) || 0) / 100)} />
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -123,7 +202,7 @@ export default function PrintShopPage({ user }) {
       for (const af of arts) {
         const art = await loadImage(af.src);
         for (const { m, img } of loadedMocks) {
-          const cvs = renderMockup(img, art, m.corners || DEFAULT_CORNERS, null, m.mode || "over");
+          const cvs = renderMockup(img, art, m.corners || DEFAULT_CORNERS, null, m.mode || "over", m.shade != null ? m.shade : 0.5);
           out.push({ key: af.name + "|" + m.id, mockupName: m.name || "Mockup", artName: af.name, url: cvs.toDataURL("image/jpeg", 0.92) });
         }
       }
@@ -139,8 +218,8 @@ export default function PrintShopPage({ user }) {
   const downloadAll = () => results.forEach((r, i) => setTimeout(() => download(r), i * 350));
 
   // --- admin: mockup management ---
-  const startAdd = () => setEditing({ id: uid(), name: "", image: null, corners: DEFAULT_CORNERS, mode: "over" });
-  const startEdit = (m) => setEditing({ id: m.id, name: m.name || "", image: m.image, corners: m.corners || DEFAULT_CORNERS, mode: m.mode || "over" });
+  const startAdd = () => setEditing({ id: uid(), name: "", image: null, corners: DEFAULT_CORNERS, mode: "over", shade: 0.5 });
+  const startEdit = (m) => setEditing({ id: m.id, name: m.name || "", image: m.image, corners: m.corners || DEFAULT_CORNERS, mode: m.mode || "over", shade: m.shade != null ? m.shade : 0.5 });
   const onMockupFile = async (file) => {
     if (!file) return;
     const image = await resizeToJpeg(file);
@@ -152,7 +231,7 @@ export default function PrintShopPage({ user }) {
     try {
       await supabase.from("print_mockups").upsert({
         id: editing.id,
-        data: { name: editing.name.trim() || "Untitled mockup", image: editing.image, corners: editing.corners, mode: editing.mode },
+        data: { name: editing.name.trim() || "Untitled mockup", image: editing.image, corners: editing.corners, mode: editing.mode, shade: editing.shade },
         updated_at: new Date().toISOString(),
       });
       setEditing(null);
@@ -316,6 +395,13 @@ export default function PrintShopPage({ user }) {
                       </select>
                       <span className="hint">Use "behind" only if your mockup is a PNG with the canvas area cut out.</span>
                     </label>
+                    {editing.mode !== "under" && (
+                      <label className="field">
+                        <span className="lab">Blend shading — {Math.round((editing.shade != null ? editing.shade : 0.5) * 100)}%</span>
+                        <input type="range" min={0} max={1} step={0.05} value={editing.shade != null ? editing.shade : 0.5} onChange={(e) => setEditing((x) => ({ ...x, shade: parseFloat(e.target.value) }))} />
+                        <span className="hint">Lets the canvas texture &amp; shadows show through the art for a realistic finish. Lower it if the art looks too dark.</span>
+                      </label>
+                    )}
                     <label className="field">
                       <span className="lab">Replace photo</span>
                       <input type="file" accept="image/*" onChange={(e) => onMockupFile(e.target.files[0])} />

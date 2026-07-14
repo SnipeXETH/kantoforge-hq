@@ -74,7 +74,7 @@ function drawTriangle(ctx, img, x0, y0, x1, y1, x2, y2, u0, v0, u1, v1, u2, v2) 
 }
 
 // Warp `art` into the quad (fractional corners) over a canvas of size W x H.
-export function warpArtwork(ctx, art, corners, W, H, grid = 24) {
+export function warpArtwork(ctx, art, corners, W, H, grid = 32) {
   const abs = corners.map((p) => ({ x: p.x * W, y: p.y * H }));
   const tf = squareToQuad(abs);
   const aw = art.naturalWidth || art.width;
@@ -103,7 +103,7 @@ export function warpArtwork(ctx, art, corners, W, H, grid = 24) {
 //                photo of a blank canvas where the art fills that area.
 //   mode "under" — art sits beneath the mockup, which is a transparent PNG
 //                with a window cut out (reflections/frame stay on top).
-export function renderMockup(mockup, art, corners, canvas, mode = "over") {
+export function renderMockup(mockup, art, corners, canvas, mode = "over", shade = 0.5) {
   const cvs = canvas || document.createElement("canvas");
   const W = mockup.naturalWidth || mockup.width;
   const H = mockup.naturalHeight || mockup.height;
@@ -114,9 +114,27 @@ export function renderMockup(mockup, art, corners, canvas, mode = "over") {
   if (mode === "under") {
     warpArtwork(ctx, art, corners, W, H);
     ctx.drawImage(mockup, 0, 0, W, H);
-  } else {
-    ctx.drawImage(mockup, 0, 0, W, H);
-    warpArtwork(ctx, art, corners, W, H);
+    return cvs;
   }
+  // "over": draw the scene, then the art clipped to the canvas region, then
+  // multiply the mockup's shading back over the art so the canvas texture and
+  // shadows show through instead of the art looking flatly pasted on.
+  ctx.drawImage(mockup, 0, 0, W, H);
+  const abs = corners.map((p) => ({ x: p.x * W, y: p.y * H }));
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(abs[0].x, abs[0].y);
+  for (let i = 1; i < 4; i++) ctx.lineTo(abs[i].x, abs[i].y);
+  ctx.closePath();
+  ctx.clip();
+  warpArtwork(ctx, art, corners, W, H);
+  if (shade > 0) {
+    ctx.globalCompositeOperation = "multiply";
+    ctx.globalAlpha = shade;
+    ctx.drawImage(mockup, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+  ctx.restore();
   return cvs;
 }
