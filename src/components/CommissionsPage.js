@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { uid, shortDate } from "../lib/format";
-import { uploadImage, scaledDataUrl } from "../lib/storage";
+import { uploadImage, scaledDataUrl, removeImage } from "../lib/storage";
 import { RoleBadges } from "./badges";
 
 const STATUS = {
@@ -54,6 +54,8 @@ function CommissionCard({ c, db, user, update }) {
   const [renderMsg, setRenderMsg] = useState(null);
   const [err, setErr] = useState(null);
   const [lightbox, setLightbox] = useState(null);
+  const [edit, setEdit] = useState(null); // {cardName, cardId, notes} while editing
+  const canEdit = isAdmin || c.requestedById === user.id;
 
   const badgesOf = (id) => {
     const u = db.users.find((x) => x.id === id);
@@ -154,6 +156,20 @@ function CommissionCard({ c, db, user, update }) {
 
   const reopen = (to) => mutate((x) => ({ ...x, status: to }), "Reopened → " + STATUS[to].label);
 
+  const startEditing = () => { setErr(null); setEdit({ cardName: c.cardName || "", cardId: c.cardId || "", notes: c.notes || "" }); };
+  const saveEdit = () => {
+    if (!edit.cardName.trim()) return setErr("Card name can't be empty.");
+    mutate((x) => ({ ...x, cardName: edit.cardName.trim(), cardId: edit.cardId.trim(), notes: edit.notes.trim() }), "Edited details");
+    setEdit(null);
+  };
+
+  const removeCommission = async () => {
+    if (!window.confirm(`Delete the commission "${c.cardName || "Untitled"}"? This can't be undone.`)) return;
+    await removeImage(c.cardImage);
+    await removeImage(c.artworkImage);
+    update((d) => ({ ...d, commissions: d.commissions.filter((x) => x.id !== c.id) }));
+  };
+
   const addComment = () => {
     const text = comment.trim();
     if (!text) return;
@@ -224,7 +240,32 @@ function CommissionCard({ c, db, user, update }) {
         )}
         {c.status === "denied" && isAdmin && <button className="btn small" onClick={() => reopen("requested")}>Reopen</button>}
         {c.status === "completed" && isAdmin && <button className="btn small" onClick={() => reopen("in_progress")}>Reopen</button>}
+        {canEdit && !action && !edit && <button className="btn small" onClick={startEditing}>Edit</button>}
+        {isAdmin && !action && !edit && <button className="btn small danger" onClick={removeCommission}>Delete</button>}
       </div>
+
+      {edit && (
+        <div className="notice mt">
+          <div className="form-row">
+            <label className="field" style={{ flex: 2 }}>
+              <span className="lab">Card name</span>
+              <input type="text" value={edit.cardName} onChange={(e) => setEdit({ ...edit, cardName: e.target.value })} autoFocus />
+            </label>
+            <label className="field">
+              <span className="lab">Card ID / set number</span>
+              <input type="text" value={edit.cardId} onChange={(e) => setEdit({ ...edit, cardId: e.target.value })} />
+            </label>
+          </div>
+          <label className="field">
+            <span className="lab">Notes</span>
+            <textarea value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} />
+          </label>
+          <div className="row">
+            <button className="btn primary small" onClick={saveEdit}>Save changes</button>
+            <button className="btn small" onClick={() => { setEdit(null); setErr(null); }}>Cancel</button>
+          </div>
+        </div>
+      )}
       {c.status === "completed" && !c.artworkImage && isAdmin && (
         <div className="muted small mt">Tip: Reopen and attach the finished artwork image on completion to enable one-click <b>Render this</b>.</div>
       )}

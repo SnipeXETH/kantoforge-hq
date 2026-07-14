@@ -27,6 +27,21 @@ export async function uploadImage(file, folder = "misc") {
   return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
+// Best-effort delete of a stored image by its public URL. Ignores old inline
+// data: URLs and any failure (a leftover file is harmless).
+export async function removeImage(url) {
+  try {
+    if (!url || typeof url !== "string") return;
+    const marker = `/object/public/${BUCKET}/`;
+    const i = url.indexOf(marker);
+    if (i === -1) return;
+    const path = decodeURIComponent(url.slice(i + marker.length));
+    await supabase.storage.from(BUCKET).remove([path]);
+  } catch (e) {
+    /* best-effort */
+  }
+}
+
 // Turn any image source (a storage URL or an old inline data: URL) into a
 // downscaled JPEG data URL — used to feed the render queue without shipping a
 // 50MB blob into a render_jobs row. Goes via a blob so the canvas isn't
