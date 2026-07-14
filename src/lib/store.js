@@ -70,43 +70,63 @@ function rowFor(table, item) {
   return { id: item.id, data: item };
 }
 
+// Preserve the Postgres/PostgREST error code on the thrown Error so callers can
+// tell "table missing" from a transient failure.
+function asError(error) {
+  const e = new Error((error && error.message) || "Database error");
+  if (error && error.code) e.code = error.code;
+  return e;
+}
+
 async function must(query) {
   const { data, error } = await query;
-  if (error) throw new Error(error.message);
+  if (error) throw asError(error);
   return data;
 }
 
-// Writes can hit transient Postgres deadlocks (40P01) or serialization
-// failures (40001) — e.g. a large commission-image write racing realtime
-// replication or a concurrent refetch. These clear on retry, so run every
-// write through a short exponential backoff. makeQuery must build a *fresh*
-// query each call (a Supabase builder only runs once).
+// Transient failures that clear on retry: deadlock (40P01), serialization
+// (40001), statement timeout (57014) — e.g. a heavy write/read racing realtime
+// replication or a concurrent refetch.
 function isTransient(error) {
   const c = error && error.code;
   const m = (error && error.message) || "";
-  return c === "40P01" || c === "40001" || /deadlock|could not serialize/i.test(m);
+  return c === "40P01" || c === "40001" || c === "57014" || /deadlock|could not serialize|timeout/i.test(m);
 }
-async function runWrite(makeQuery, tries = 6) {
+
+// The table genuinely doesn't exist yet (so a migration really is needed) — as
+// opposed to any other read failure, which must NOT be shown as "run migration".
+export function tableMissing(error) {
+  const c = error && error.code;
+  const m = (error && error.message) || "";
+  return c === "42P01" || c === "PGRST205" || /does not exist|could not find the table|schema cache/i.test(m);
+}
+
+// Run a query with a few backoff retries on transient failures. makeQuery must
+// build a *fresh* query each call (a Supabase builder only runs once).
+async function withRetry(makeQuery, tries = 6) {
   for (let attempt = 1; ; attempt++) {
     const { data, error } = await makeQuery();
     if (!error) return data;
-    if (!isTransient(error) || attempt >= tries) throw new Error(error.message);
+    if (!isTransient(error) || attempt >= tries) throw asError(error);
     await new Promise((r) => setTimeout(r, 120 * attempt * attempt)); // 120ms, 480, 1080, …
   }
 }
 
 // Supabase caps any single query at 1000 rows (PostgREST max-rows), so a store
 // with thousands of orders would silently load only the newest 1000. Page
-// through in 1000-row windows with .range() until a short page ends it.
+// through in windows with .range() until a short page ends it. Every page
+// retries on transient failures.
 const PAGE = 1000;
-async function fetchAll(table, { select = "data", order } = {}) {
+async function fetchAll(table, { select = "data", order, pageSize = PAGE } = {}) {
   const rows = [];
-  for (let from = 0; ; from += PAGE) {
-    let q = supabase.from(table).select(select).range(from, from + PAGE - 1);
-    if (order) q = q.order(order.column, { ascending: order.ascending });
-    const batch = await must(q);
+  for (let from = 0; ; from += pageSize) {
+    const batch = await withRetry(() => {
+      let q = supabase.from(table).select(select).range(from, from + pageSize - 1);
+      if (order) q = q.order(order.column, { ascending: order.ascending });
+      return q;
+    });
     rows.push(...batch);
-    if (batch.length < PAGE) break;
+    if (batch.length < pageSize) break;
   }
   return rows;
 }
@@ -133,36 +153,42 @@ export async function fetchDb(currentUserId) {
 
   let monthlyFigures = [];
   let monthlyFiguresReady = true;
+  let monthlyFiguresError = null;
   if (may("monthly_figures")) {
     try {
       const rows = await fetchAll("monthly_figures");
       monthlyFigures = rows.map((r) => r.data).sort((a, b) => (b.id || "").localeCompare(a.id || ""));
     } catch (e) {
-      monthlyFiguresReady = false;
+      if (tableMissing(e)) monthlyFiguresReady = false;
+      else monthlyFiguresError = e.message || String(e);
     }
   }
 
   let commissions = [];
   let commissionsReady = true;
+  let commissionsError = null;
   if (may("commissions")) {
     try {
       const rows = await fetchAll("commissions");
       commissions = rows.map((r) => r.data).sort((a, b) => (b.requestedAt || "").localeCompare(a.requestedAt || ""));
     } catch (e) {
-      commissionsReady = false;
+      if (tableMissing(e)) commissionsReady = false;
+      else commissionsError = e.message || String(e);
     }
   }
 
   let competitions = [];
   let raffleEntries = [];
   let rafflesReady = true;
+  let rafflesError = null;
   if (may("competitions") || may("raffle_entries")) {
     try {
       const [cs, es] = await Promise.all([fetchAll("competitions"), fetchAll("raffle_entries")]);
       competitions = cs.map((r) => r.data).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
       raffleEntries = es.map((r) => r.data);
     } catch (e) {
-      rafflesReady = false;
+      if (tableMissing(e)) rafflesReady = false;
+      else rafflesError = e.message || String(e);
     }
   }
 
@@ -174,11 +200,14 @@ export async function fetchDb(currentUserId) {
     tasks: tasks.map((r) => r.data).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")),
     monthlyFigures,
     monthlyFiguresReady,
+    monthlyFiguresError,
     commissions,
     commissionsReady,
+    commissionsError,
     competitions,
     raffleEntries,
     rafflesReady,
+    rafflesError,
     settings: mergeSettings(settingsRow ? settingsRow.data : null),
   };
 }
@@ -211,12 +240,12 @@ async function _syncDb(prev, next) {
     const deletes = prev[key].filter((x) => !seen.has(x.id)).map((x) => x.id);
     for (let i = 0; i < upserts.length; i += CHUNK) {
       const chunk = upserts.slice(i, i + CHUNK);
-      jobs.push(runWrite(() => supabase.from(table).upsert(chunk)));
+      jobs.push(withRetry(() => supabase.from(table).upsert(chunk)));
     }
-    if (deletes.length) jobs.push(runWrite(() => supabase.from(table).delete().in("id", deletes)));
+    if (deletes.length) jobs.push(withRetry(() => supabase.from(table).delete().in("id", deletes)));
   }
   if (prev.settings !== next.settings) {
-    jobs.push(runWrite(() => supabase.from("app_settings").upsert({ id: 1, data: next.settings })));
+    jobs.push(withRetry(() => supabase.from("app_settings").upsert({ id: 1, data: next.settings })));
   }
   if (prev.users !== next.users) {
     const prevById = new Map(prev.users.map((u) => [u.id, u]));
@@ -229,7 +258,7 @@ async function _syncDb(prev, next) {
       if (JSON.stringify(p.access || null) !== JSON.stringify(u.access || null)) patch.access = u.access || null;
       if (Object.keys(patch).length) {
         const p2 = patch;
-        jobs.push(runWrite(() => supabase.from("profiles").update(p2).eq("id", u.id)));
+        jobs.push(withRetry(() => supabase.from("profiles").update(p2).eq("id", u.id)));
       }
     }
   }
@@ -264,14 +293,14 @@ export async function importBackup(data) {
     const rows = (data[key] || []).filter((x) => x && x.id).map((x) => rowFor(table, x));
     for (let i = 0; i < rows.length; i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK);
-      jobs.push(runWrite(() => supabase.from(table).upsert(chunk)));
+      jobs.push(withRetry(() => supabase.from(table).upsert(chunk)));
     }
   }
-  jobs.push(runWrite(() => supabase.from("app_settings").upsert({ id: 1, data: mergeSettings(data.settings) })));
+  jobs.push(withRetry(() => supabase.from("app_settings").upsert({ id: 1, data: mergeSettings(data.settings) })));
   await Promise.all(jobs);
 }
 
 export async function wipeData() {
-  await Promise.all(TABLE_MAP.map(([, table]) => runWrite(() => supabase.from(table).delete().neq("id", ""))));
-  await runWrite(() => supabase.from("app_settings").upsert({ id: 1, data: {} }));
+  await Promise.all(TABLE_MAP.map(([, table]) => withRetry(() => supabase.from(table).delete().neq("id", ""))));
+  await withRetry(() => supabase.from("app_settings").upsert({ id: 1, data: {} }));
 }

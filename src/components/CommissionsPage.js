@@ -380,6 +380,10 @@ alter publication supabase_realtime add table public.commissions;`}</pre>
         <button className="btn primary" onClick={() => setShowForm(!showForm)}>{showForm ? "Cancel" : "+ New request"}</button>
       </div>
 
+      {db.commissionsError && (
+        <div className="notice bad mb">⚠️ Couldn't load commissions just now: {db.commissionsError}. It retries automatically — if it keeps happening, tell me the message above.</div>
+      )}
+
       {showForm && (
         <form className="card mb" onSubmit={submit}>
           <h2>New commission request</h2>
