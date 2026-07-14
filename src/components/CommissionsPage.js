@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { uid, shortDate } from "../lib/format";
-import { fileToResizedDataUrl } from "../lib/image";
+import { uploadImage, scaledDataUrl } from "../lib/storage";
 import { RoleBadges } from "./badges";
 
 const STATUS = {
@@ -78,7 +78,7 @@ function CommissionCard({ c, db, user, update }) {
     if (!file) return setErr("Upload a PNG of the card first.");
     setBusy(true);
     try {
-      const image = await fileToResizedDataUrl(file);
+      const image = await uploadImage(file, "commissions/cards");
       const assignee = db.users.find((u) => u.id === assigneeId);
       mutate(
         (x) => ({
@@ -112,7 +112,7 @@ function CommissionCard({ c, db, user, update }) {
     setBusy(true);
     try {
       let artworkImage = c.artworkImage || null;
-      if (artworkFile) artworkImage = await fileToResizedDataUrl(artworkFile, 2000);
+      if (artworkFile) artworkImage = await uploadImage(artworkFile, "commissions/artwork");
       mutate(
         (x) => ({ ...x, status: "completed", finalLink: finalLink.trim(), artworkImage, completedAt: new Date().toISOString() }),
         "Completed" + (finalLink.trim() ? " · " + finalLink.trim() : "") + (artworkImage ? " · artwork attached" : "")
@@ -132,11 +132,12 @@ function CommissionCard({ c, db, user, update }) {
     if (!c.cardImage || !c.artworkImage) return setErr("Need both the card image and the finished artwork to render.");
     setRendering(true);
     try {
+      const [cardData, artData] = await Promise.all([scaledDataUrl(c.cardImage), scaledDataUrl(c.artworkImage)]);
       const { error } = await supabase.from("render_jobs").insert({
         id: uid(),
         status: "queued",
-        card_image: c.cardImage,
-        art_image: c.artworkImage,
+        card_image: cardData,
+        art_image: artData,
         params: { resX: 2000, resY: 2000, cardName: c.cardName || "commission", artName: (c.cardName || "commission") + " background" },
         created_by: user.id,
         created_by_name: user.name,
