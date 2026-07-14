@@ -76,6 +76,25 @@ async function must(query) {
   return data;
 }
 
+// Writes can hit transient Postgres deadlocks (40P01) or serialization
+// failures (40001) — e.g. a large commission-image write racing realtime
+// replication or a concurrent refetch. These clear on retry, so run every
+// write through a short exponential backoff. makeQuery must build a *fresh*
+// query each call (a Supabase builder only runs once).
+function isTransient(error) {
+  const c = error && error.code;
+  const m = (error && error.message) || "";
+  return c === "40P01" || c === "40001" || /deadlock|could not serialize/i.test(m);
+}
+async function runWrite(makeQuery, tries = 6) {
+  for (let attempt = 1; ; attempt++) {
+    const { data, error } = await makeQuery();
+    if (!error) return data;
+    if (!isTransient(error) || attempt >= tries) throw new Error(error.message);
+    await new Promise((r) => setTimeout(r, 120 * attempt * attempt)); // 120ms, 480, 1080, …
+  }
+}
+
 // Supabase caps any single query at 1000 rows (PostgREST max-rows), so a store
 // with thousands of orders would silently load only the newest 1000. Page
 // through in 1000-row windows with .range() until a short page ends it.
@@ -167,7 +186,18 @@ export async function fetchDb(currentUserId) {
 // Push the difference between two db states to Supabase. Slices that kept
 // their object identity are untouched; within a changed slice, items are
 // compared by reference and matched by id.
-export async function syncDb(prev, next) {
+//
+// Calls are serialised (one at a time) so two rapid edits never issue
+// overlapping write transactions that could deadlock each other, and every
+// write retries on a transient deadlock.
+let syncChain = Promise.resolve();
+export function syncDb(prev, next) {
+  const run = () => _syncDb(prev, next);
+  syncChain = syncChain.then(run, run); // run even if a prior sync rejected
+  return syncChain;
+}
+
+async function _syncDb(prev, next) {
   const jobs = [];
   for (const [key, table] of TABLE_MAP) {
     if (prev[key] === next[key]) continue;
@@ -180,12 +210,13 @@ export async function syncDb(prev, next) {
     }
     const deletes = prev[key].filter((x) => !seen.has(x.id)).map((x) => x.id);
     for (let i = 0; i < upserts.length; i += CHUNK) {
-      jobs.push(must(supabase.from(table).upsert(upserts.slice(i, i + CHUNK))));
+      const chunk = upserts.slice(i, i + CHUNK);
+      jobs.push(runWrite(() => supabase.from(table).upsert(chunk)));
     }
-    if (deletes.length) jobs.push(must(supabase.from(table).delete().in("id", deletes)));
+    if (deletes.length) jobs.push(runWrite(() => supabase.from(table).delete().in("id", deletes)));
   }
   if (prev.settings !== next.settings) {
-    jobs.push(must(supabase.from("app_settings").upsert({ id: 1, data: next.settings })));
+    jobs.push(runWrite(() => supabase.from("app_settings").upsert({ id: 1, data: next.settings })));
   }
   if (prev.users !== next.users) {
     const prevById = new Map(prev.users.map((u) => [u.id, u]));
@@ -196,7 +227,10 @@ export async function syncDb(prev, next) {
       if (p.role !== u.role) patch.role = u.role;
       if (JSON.stringify(p.badges || []) !== JSON.stringify(u.badges || [])) patch.badges = u.badges || [];
       if (JSON.stringify(p.access || null) !== JSON.stringify(u.access || null)) patch.access = u.access || null;
-      if (Object.keys(patch).length) jobs.push(must(supabase.from("profiles").update(patch).eq("id", u.id)));
+      if (Object.keys(patch).length) {
+        const p2 = patch;
+        jobs.push(runWrite(() => supabase.from("profiles").update(p2).eq("id", u.id)));
+      }
     }
   }
   await Promise.all(jobs);
@@ -229,14 +263,15 @@ export async function importBackup(data) {
   for (const [key, table] of TABLE_MAP) {
     const rows = (data[key] || []).filter((x) => x && x.id).map((x) => rowFor(table, x));
     for (let i = 0; i < rows.length; i += CHUNK) {
-      jobs.push(must(supabase.from(table).upsert(rows.slice(i, i + CHUNK))));
+      const chunk = rows.slice(i, i + CHUNK);
+      jobs.push(runWrite(() => supabase.from(table).upsert(chunk)));
     }
   }
-  jobs.push(must(supabase.from("app_settings").upsert({ id: 1, data: mergeSettings(data.settings) })));
+  jobs.push(runWrite(() => supabase.from("app_settings").upsert({ id: 1, data: mergeSettings(data.settings) })));
   await Promise.all(jobs);
 }
 
 export async function wipeData() {
-  await Promise.all(TABLE_MAP.map(([, table]) => must(supabase.from(table).delete().neq("id", ""))));
-  await must(supabase.from("app_settings").upsert({ id: 1, data: {} }));
+  await Promise.all(TABLE_MAP.map(([, table]) => runWrite(() => supabase.from(table).delete().neq("id", ""))));
+  await runWrite(() => supabase.from("app_settings").upsert({ id: 1, data: {} }));
 }
