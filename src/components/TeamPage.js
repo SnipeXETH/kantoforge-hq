@@ -4,7 +4,7 @@ import { shortDate } from "../lib/format";
 import { RoleBadges, BADGE_OPTIONS, BADGE_COLORS } from "./badges";
 import {
   PAGE_LABELS, PAGE_SECTIONS, ADMIN_ONLY_PAGES, ASSIGNABLE_PAGES, ACCESS_PRESETS,
-  allowedPages, isLimited,
+  RESTRICTED_PAGES, grantsOf, allowedPages, isLimited,
 } from "../lib/access";
 
 function sameSet(a, b) {
@@ -127,6 +127,19 @@ export default function TeamPage({ db, update, user }) {
     }));
   };
 
+  const setGrant = (target, page, on) =>
+    update((d) => ({
+      ...d,
+      users: d.users.map((u) => {
+        if (u.id !== target.id) return u;
+        const a = u.access && typeof u.access === "object" ? { ...u.access } : { mode: "full" };
+        const cur = Array.isArray(a.grants) ? a.grants : [];
+        a.grants = on ? Array.from(new Set([...cur, page])) : cur.filter((p) => p !== page);
+        const empty = a.mode === "full" && (!a.pages || !a.pages.length) && !a.grants.length;
+        return { ...u, access: empty ? null : a };
+      }),
+    }));
+
   const toggleBadge = (target, badge) => {
     update((d) => ({
       ...d,
@@ -236,6 +249,38 @@ export default function TeamPage({ db, update, user }) {
         if (!u || u.role === "admin") return null;
         return <AccessModal u={u} update={update} onClose={() => setEditingAccess(null)} />;
       })()}
+
+      {isAdmin && RESTRICTED_PAGES.length > 0 && (
+        <div className="card mt">
+          <h2 style={{ marginTop: 0 }}>Private sections</h2>
+          <div className="card-sub mb">Hidden from everyone — including other admins — unless you grant them here. Click a name to grant or revoke.</div>
+          {RESTRICTED_PAGES.map((page) => {
+            const withAccess = db.users.filter((u) => grantsOf(u).includes(page));
+            return (
+              <div key={page} style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 12 }}>
+                <b>{PAGE_LABELS[page]}</b>
+                <div className="row mt" style={{ flexWrap: "wrap", gap: 8 }}>
+                  {db.users.map((u) => {
+                    const on = grantsOf(u).includes(page);
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        className="role-badge"
+                        onClick={() => setGrant(u, page, !on)}
+                        style={{ cursor: "pointer", fontSize: 12, padding: "5px 11px", color: on ? "#7ee2a8" : "var(--text-3)", borderColor: on ? "rgba(46,204,113,0.45)" : "var(--border-strong)", background: on ? "rgba(46,204,113,0.14)" : "transparent", opacity: on ? 1 : 0.6 }}
+                      >
+                        {on ? "✓ " : ""}{u.name}{u.id === user.id ? " (you)" : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="muted small mt">Can access: <b>{withAccess.length ? withAccess.map((u) => u.name).join(", ") : "nobody yet"}</b></div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {isAdmin && (
         <div className="notice mt">
