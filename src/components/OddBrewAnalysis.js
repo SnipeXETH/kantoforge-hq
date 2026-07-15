@@ -27,6 +27,55 @@ const coverLabel = (d) => {
 // dash or spaced hyphen, so we group variants back to their product line.
 const productLine = (name) => String(name || "").split(/\s+[—–-]\s+/)[0].trim() || "(unnamed)";
 
+// The variants still on sale (from the store's product pages):
+//   Signature cup — 5 colours × {250ml, 350ml}
+//   Studio cup    — 5 colours × 200ml
+const SIG_COLOURS = ["Blue/White", "Black/White", "Black", "Cream/Pink", "Green/Black"];
+const STU_COLOURS = ["Yellow/Blue", "White Mix", "Yellow/Brown", "Brown/Cream", "Cream/Orange"];
+// Lower-case and collapse runs of whitespace to a single space — keeping the
+// spaces means the " / " option separator stays distinct from the slash inside
+// a compound colour like "blue/white".
+const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+// Does the variant name carry this colour option? A compound colour ("blue/white")
+// is distinctive enough to match as a substring; a plain colour ("black") must
+// stand alone so it doesn't get swallowed by "black/white".
+function hasColour(name, colour) {
+  const c = norm(colour);
+  if (c.includes("/")) return name.includes(c);
+  return new RegExp(`(^|[^a-z0-9])${c}([^a-z0-9/]|$)`).test(name);
+}
+const hasSize = (name, ml) => new RegExp(`(^|[^0-9])${ml}\\s*ml`).test(name);
+function isSellingName(raw) {
+  const name = norm(raw);
+  const sig = SIG_COLOURS.some((c) => hasColour(name, c)) && (hasSize(name, 250) || hasSize(name, 350));
+  const stu = STU_COLOURS.some((c) => hasColour(name, c)) && hasSize(name, 200);
+  return sig || stu;
+}
+
+// Keys to hide so only the current Signature + Studio variants remain. It finds
+// the two live products by their colour fingerprint (a line where at least half
+// the variants, and 2+, match the spec) — so a discontinued line that happens
+// to share one colour/size doesn't sneak through.
+function autoHideKeys(allRows) {
+  const byLine = new Map();
+  for (const r of allRows) {
+    const p = productLine(r.name);
+    if (!byLine.has(p)) byLine.set(p, []);
+    byLine.get(p).push(r);
+  }
+  const current = new Set();
+  for (const [line, rs] of byLine) {
+    const matches = rs.filter((r) => isSellingName(r.name)).length;
+    if (matches >= 2 && matches / rs.length >= 0.5) current.add(line);
+  }
+  // Fallback: if no line fingerprints as current, keep any spec-matching row.
+  const keep = (r) => current.size
+    ? current.has(productLine(r.name)) && isSellingName(r.name)
+    : isSellingName(r.name);
+  return allRows.filter((r) => !keep(r)).map((r) => r.key);
+}
+
 const chipStyle = (on) => ({
   padding: "4px 11px", borderRadius: 999, cursor: "pointer", fontSize: 12.5, fontWeight: 600,
   border: "1px solid " + (on ? "var(--accent, #6ea8fe)" : "var(--border)"),
@@ -95,6 +144,12 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
   const toggleRow = (key) => hideKeys([key], !hidden.has(key));
   const toggleLine = (l) => hideKeys(l.keys, l.on); // any shown → hide all; else show all
   const showAll = () => setHidden([]);
+  const keepCurrentOnly = () => {
+    const keys = autoHideKeys(allRows);
+    setHidden(keys);
+    const kept = allRows.length - keys.length;
+    setSyncResult(`Kept ${kept} current variant${kept === 1 ? "" : "s"}, hid ${keys.length}. Check the “Hidden” list below if anything looks off.`);
+  };
 
   // Persist one variant's manual counts. Merge onto any Shopify-synced fields so
   // a later stock sync (which keeps manual fields) and this stay consistent.
@@ -170,6 +225,13 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
           </div>
         </div>
         {syncResult && <div className="notice good mt small">{syncResult}</div>}
+
+        {allRows.length > 0 && (
+          <div className="row mt" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button className="btn small primary" onClick={keepCurrentOnly}>✨ Keep only current lines</button>
+            <span className="muted small">Auto-hides everything except the Signature (10) and Studio (5) variants you still sell.</span>
+          </div>
+        )}
 
         {lines.length > 1 && (
           <div className="mt">
