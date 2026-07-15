@@ -82,6 +82,7 @@ export const ODDBREW_DEFAULTS = {
   cogsPct: 0, // extra cost of goods as % of revenue (optional)
   costPerOrder: 0, // extra flat cost per order (optional)
   fixedMonthly: 0, // fixed monthly overhead (rent, subs, etc.)
+  excludeProducts: [], // keywords for products to ignore (e.g. a previous store)
   // Per-size cost rules: match the size text in the variant name, then product
   // cost + shipping cost for the destination region (UK / US / EU-rest).
   costRules: [], // [{ id, label, match, productCost, shipUK, shipUS, shipEU }]
@@ -108,13 +109,33 @@ export function findCostRule(name, rules) {
   return (rules || []).find((r) => r.match && n.includes(squash(r.match)));
 }
 
-// Distinct sold items that don't match any rule, with total quantity.
+// Products to ignore entirely (e.g. items from a previous store on the same
+// Shopify account). Matched by keyword, ignoring case & spaces.
+export function isExcluded(name, cfg) {
+  const list = cfg.excludeProducts || [];
+  if (!list.length) return false;
+  const n = squash(name);
+  return list.some((k) => k && n.includes(squash(k)));
+}
+
+// Drop orders whose every line item is an ignored product; keep the rest.
+export function activeOrders(orders, cfg) {
+  if (!(cfg.excludeProducts || []).length) return orders || [];
+  return (orders || []).filter((o) => {
+    const items = o.items || [];
+    if (!items.length) return true;
+    return items.some((it) => !isExcluded(it.name, cfg));
+  });
+}
+
+// Distinct sold items that don't match any rule, with total quantity. Ignored
+// products are skipped (they aren't "unmatched", they're not ours).
 export function unmatchedBreakdown(orders, cfg) {
   const rules = cfg.costRules || [];
   const map = new Map();
   for (const o of orders || []) {
     for (const it of o.items || []) {
-      if (findCostRule(it.name, rules)) continue;
+      if (isExcluded(it.name, cfg) || findCostRule(it.name, rules)) continue;
       const name = it.name || "(unnamed)";
       map.set(name, (map.get(name) || 0) + (it.qty || 1));
     }
@@ -132,6 +153,7 @@ export function orderCogsOddbrew(order, cfg, revenue) {
   let cogs = 0;
   let unmatched = 0;
   for (const item of order.items || []) {
+    if (isExcluded(item.name, cfg)) continue;
     const rule = findCostRule(item.name, rules);
     const qty = item.qty || 1;
     if (rule) {

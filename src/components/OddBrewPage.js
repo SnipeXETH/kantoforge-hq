@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { uid, money, monthLabel } from "../lib/format";
 import { GroupedBars, Legend } from "./charts";
-import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex, parseMetaSpendCsv, unmatchedBreakdown } from "../lib/oddbrew";
+import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex, parseMetaSpendCsv, unmatchedBreakdown, activeOrders } from "../lib/oddbrew";
 import OddBrewInvoices from "./OddBrewInvoices";
 
 // The OMGO cost sheet, ready to seed (USD): [label, match, product, UK, US, EU].
@@ -114,8 +114,9 @@ export default function OddBrewPage({ user }) {
   };
   const inRange = (o) => dateInRange(o.date);
 
-  const costIndex = buildInvoiceCostIndex(invoices, orders || [], cfg);
-  const shown = (orders || []).filter(inRange);
+  const active = activeOrders(orders || [], cfg);
+  const costIndex = buildInvoiceCostIndex(invoices, active, cfg);
+  const shown = active.filter(inRange);
   const totals = oddbrewTotals(shown, cfg, costIndex);
   const monthly = oddbrewMonthly(shown, cfg, costIndex);
 
@@ -155,6 +156,7 @@ export default function OddBrewPage({ user }) {
   };
   const updateRule = (i, patch) => setRules(rules.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const removeRule = (i) => setRules(rules.filter((_, idx) => idx !== i));
+  const excludeItem = (name) => saveCfg({ ...cfg, excludeProducts: [...(cfg.excludeProducts || []), name] });
 
   const importFiles = async (files) => {
     setErr(null); setMsg(null); setBusy(true);
@@ -434,10 +436,15 @@ export default function OddBrewPage({ user }) {
         )}
 
         <div className="form-row mt">
-          <label className="field" style={{ maxWidth: 300 }}>
+          <label className="field" style={{ maxWidth: 260 }}>
             <span className="lab">Cost → store-currency rate</span>
             <input type="number" step="0.01" value={cfg.costFx} onChange={(e) => setField(["costFx"], numField(e.target.value))} />
             <span className="hint">Multiplies every cost above. The OMGO sheet is in USD — if the store is in {cur}, set e.g. 0.79. Leave 1 if same currency.</span>
+          </label>
+          <label className="field" style={{ flex: 1 }}>
+            <span className="lab">Ignore products containing</span>
+            <input type="text" value={(cfg.excludeProducts || []).join(", ")} onChange={(e) => setField(["excludeProducts"], e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} placeholder="e.g. Lamp, Lumiscence, Solace" />
+            <span className="hint">Comma-separated keywords. Orders that are <i>only</i> these products drop out of OddBrew entirely — for stock from a previous store. Ignores case &amp; spaces.</span>
           </label>
         </div>
 
@@ -453,7 +460,12 @@ export default function OddBrewPage({ user }) {
                     <tr key={u.name}>
                       <td className="small">{u.name}</td>
                       <td className="num">{u.qty}</td>
-                      <td className="num"><button className="btn small" onClick={() => addRuleFrom(u.name)}>+ rule</button></td>
+                      <td className="num">
+                        <span className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
+                          <button className="btn small" onClick={() => addRuleFrom(u.name)}>+ rule</button>
+                          <button className="btn small" onClick={() => excludeItem(u.name)} title="Not one of my products — ignore it">Not mine</button>
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
