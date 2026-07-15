@@ -144,6 +144,15 @@ create table public.oddbrew_config (
 );
 insert into public.oddbrew_config (id, data) values (1, '{}'::jsonb);
 
+-- Server-only: holds the OddBrew Shopify OAuth token. RLS on, no policies, so
+-- only the serverless functions (service role) can read it.
+create table public.oddbrew_secrets (
+  id int primary key,
+  data jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+insert into public.oddbrew_secrets (id, data) values (1, '{}'::jsonb);
+
 insert into public.app_settings (id, data) values (1, '{}'::jsonb);
 
 -- ---------------------------------------------------------------------------
@@ -164,6 +173,7 @@ alter table public.render_jobs enable row level security;
 alter table public.print_mockups enable row level security;
 alter table public.oddbrew_orders enable row level security;
 alter table public.oddbrew_config enable row level security;
+alter table public.oddbrew_secrets enable row level security; -- no policies: server-only
 
 create policy "team can read profiles" on public.profiles
   for select to authenticated using (true);

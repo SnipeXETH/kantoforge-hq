@@ -19,7 +19,6 @@ const OVERLAP_MS = 10 * 60 * 1000;
 function missingConfig() {
   const need = {
     ODDBREW_SHOPIFY_STORE_DOMAIN: process.env.ODDBREW_SHOPIFY_STORE_DOMAIN,
-    ODDBREW_SHOPIFY_ADMIN_TOKEN: process.env.ODDBREW_SHOPIFY_ADMIN_TOKEN,
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     REACT_APP_SUPABASE_URL: process.env.REACT_APP_SUPABASE_URL || process.env.SUPABASE_URL,
   };
@@ -29,15 +28,12 @@ function missingConfig() {
 function shopDomain() {
   return (process.env.ODDBREW_SHOPIFY_STORE_DOMAIN || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
 }
-function adminToken() {
-  return (process.env.ODDBREW_SHOPIFY_ADMIN_TOKEN || "").trim();
-}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchPage(url) {
+async function fetchPage(url, token) {
   for (let attempt = 0; attempt < 6; attempt++) {
-    const resp = await fetch(url, { headers: { "X-Shopify-Access-Token": adminToken() } });
+    const resp = await fetch(url, { headers: { "X-Shopify-Access-Token": token } });
     if (resp.status === 429) { await sleep(1500); continue; }
     if (!resp.ok) {
       const text = (await resp.text()).slice(0, 300);
@@ -104,10 +100,10 @@ async function upsertOrders(supaAdmin, orders) {
   }
 }
 
-async function shopifyOrderCount() {
+async function shopifyOrderCount(token) {
   try {
     const r = await fetch(`https://${shopDomain()}/admin/api/${API_VERSION}/orders/count.json?status=any`, {
-      headers: { "X-Shopify-Access-Token": adminToken() },
+      headers: { "X-Shopify-Access-Token": token },
     });
     if (!r.ok) return null;
     const b = await r.json();
@@ -117,7 +113,19 @@ async function shopifyOrderCount() {
   }
 }
 
+async function resolveToken(supaAdmin) {
+  const { data } = await supaAdmin.from("oddbrew_secrets").select("data").eq("id", 1).maybeSingle();
+  const stored = data && data.data && data.data.adminToken;
+  return (stored || process.env.ODDBREW_SHOPIFY_ADMIN_TOKEN || "").trim();
+}
+
 async function runSync(supaAdmin, opts = {}) {
+  const token = await resolveToken(supaAdmin);
+  if (!token) {
+    const err = new Error("OddBrew isn't connected to Shopify yet — open OddBrew in the portal and click Connect.");
+    err.notConnected = true;
+    throw err;
+  }
   const { data: row, error: cfgErr } = await supaAdmin.from("oddbrew_config").select("data").eq("id", 1).maybeSingle();
   if (cfgErr) throw new Error("Supabase: " + cfgErr.message);
   const config = (row && row.data) || {};
@@ -142,7 +150,7 @@ async function runSync(supaAdmin, opts = {}) {
   let done = false;
 
   while (Date.now() - started < TIME_BUDGET_MS) {
-    const page = await fetchPage(url);
+    const page = await fetchPage(url, token);
     const usable = page.orders.filter((o) => !o.test);
     await upsertOrders(supaAdmin, usable.map(mapOrder));
     fetched += usable.length;
@@ -170,7 +178,7 @@ async function runSync(supaAdmin, opts = {}) {
   }
 
   await supaAdmin.from("oddbrew_config").upsert({ id: 1, data: { ...config, sync } });
-  const shopifyTotal = await shopifyOrderCount();
+  const shopifyTotal = await shopifyOrderCount(token);
   return { fetched, done, mode, shopifyTotal, oldestSeen: cursor };
 }
 

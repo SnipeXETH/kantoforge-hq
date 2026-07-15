@@ -41,6 +41,7 @@ export default function OddBrewPage({ user }) {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [connected, setConnected] = useState(false);
   const fileRef = useRef(null);
 
   const cur = cfg.currency || "GBP";
@@ -59,10 +60,18 @@ export default function OddBrewPage({ user }) {
 
   const fetchConfig = async () => {
     const { data } = await supabase.from("oddbrew_config").select("data").eq("id", 1).maybeSingle();
-    setCfg(mergeConfig(data && data.data ? data.data : null));
+    const raw = data && data.data ? data.data : null;
+    setCfg(mergeConfig(raw));
+    setConnected(!!(raw && raw.shopifyConnected));
   };
 
   useEffect(() => { fetchOrders(); fetchConfig(); }, []);
+  // Re-check connection when returning from the Shopify OAuth tab.
+  useEffect(() => {
+    const onFocus = () => fetchConfig();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   const inRange = (o) => {
     if (range === "all") return true;
@@ -203,19 +212,31 @@ export default function OddBrewPage({ user }) {
       <div className="grid two mt">
         <div className="card" style={{ margin: 0 }}>
           <h3>Sync from Shopify</h3>
-          <div className="muted small mt">Pulls orders straight from the OddBrew store. Needs its Shopify credentials set in Vercel (separate from KantoForge).</div>
-          <div className="row mt">
-            <button className="btn primary" onClick={() => runSync(false)} disabled={syncing}>{syncing ? "Syncing…" : "⟳ Sync OddBrew now"}</button>
-            <button className="btn" onClick={() => runSync(true)} disabled={syncing}>Full re-sync</button>
-          </div>
+          {connected ? (
+            <>
+              <div className="notice good mt small">✓ Connected to the OddBrew Shopify store.</div>
+              <div className="row mt">
+                <button className="btn primary" onClick={() => runSync(false)} disabled={syncing}>{syncing ? "Syncing…" : "⟳ Sync OddBrew now"}</button>
+                <button className="btn" onClick={() => runSync(true)} disabled={syncing}>Full re-sync</button>
+              </div>
+              <div className="muted small mt"><a href="/api/oddbrew-auth" target="_blank" rel="noreferrer">Re-connect</a> if it ever stops working.</div>
+            </>
+          ) : (
+            <>
+              <div className="muted small mt">Connect the OddBrew store once, then orders sync automatically. Add the app's Client ID &amp; Secret in Vercel first (see below).</div>
+              <a className="btn primary mt" href="/api/oddbrew-auth" target="_blank" rel="noreferrer" style={{ display: "inline-flex" }}>🔗 Connect OddBrew Shopify</a>
+            </>
+          )}
           {syncResult && <div className="notice good mt small">{syncResult}</div>}
-          {showHelp && (
+          {(showHelp || !connected) && (
             <div className="notice mt small">
-              Set these in Vercel → Settings → Environment Variables, then redeploy:
+              In Vercel → Settings → Environment Variables (then redeploy):
               <ul style={{ margin: "6px 0 0 16px" }}>
                 <li><code>ODDBREW_SHOPIFY_STORE_DOMAIN</code> — e.g. <code>oddbrew.myshopify.com</code></li>
-                <li><code>ODDBREW_SHOPIFY_ADMIN_TOKEN</code> — the <code>shpat_…</code> token from a custom app on the OddBrew store (read_orders)</li>
+                <li><code>ODDBREW_SHOPIFY_CLIENT_ID</code> — the Dev Dashboard app's Client ID</li>
+                <li><code>ODDBREW_SHOPIFY_CLIENT_SECRET</code> — its Secret (<code>shpss_…</code>)</li>
               </ul>
+              And in the Dev Dashboard app, add this as an allowed redirect URL: <code>{window.location.origin}/api/oddbrew-auth</code>
             </div>
           )}
         </div>
