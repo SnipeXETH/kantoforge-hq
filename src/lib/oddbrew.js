@@ -74,12 +74,47 @@ export function importOddbrewCsv(text) {
   return orders.map((o) => ({ ...o, id: "oddbrew:" + o.orderId, platform: "shopify", channelVia: "shopify" }));
 }
 
-export function enrichOddbrew(order, cfg) {
+// If actualCost is given (from a verified supplier invoice) it's used as the
+// cost of goods; otherwise the size-rule estimate is used.
+export function enrichOddbrew(order, cfg, actualCost) {
   const revenue = orderRevenue(order);
   const fees = shopifyFees(order, cfg.shopify || ODDBREW_DEFAULTS.shopify).total;
-  const c = orderCogsOddbrew(order, cfg, revenue);
-  const profit = revenue - fees - c.total;
-  return { ...order, revenue, fees, cogs: c.total, cogsUnmatched: c.unmatched, profit };
+  let cogs, unmatched = 0, basis;
+  if (actualCost != null) {
+    cogs = actualCost;
+    basis = "invoice";
+  } else {
+    const c = orderCogsOddbrew(order, cfg, revenue);
+    cogs = c.total;
+    unmatched = c.unmatched;
+    basis = "estimate";
+  }
+  const profit = revenue - fees - cogs;
+  return { ...order, revenue, fees, cogs, cogsUnmatched: unmatched, costBasis: basis, profit };
+}
+
+// Map each covered order to its actual cost from saved invoices. An invoice's
+// invoiced total is split across its orders in proportion to their estimated
+// cost, so the shipping discount is shared fairly.
+export function buildInvoiceCostIndex(invoices, orders, cfg) {
+  const byId = new Map((orders || []).map((o) => [o.orderId, o]));
+  const index = new Map();
+  const storeCur = cfg.currency || "GBP";
+  for (const inv of invoices || []) {
+    const nums = inv.orderNumbers || [];
+    const invoiced = storeCur === "USD" ? inv.invoicedUsd : inv.invoicedGbp;
+    if (invoiced == null || !nums.length) continue;
+    const ests = nums.map((n) => {
+      const o = byId.get(n);
+      return { n, est: o ? orderCogsOddbrew(o, cfg, orderRevenue(o)).total : 0 };
+    });
+    const totalEst = ests.reduce((s, e) => s + e.est, 0);
+    for (const e of ests) {
+      const share = totalEst > 0 ? e.est / totalEst : 1 / ests.length;
+      index.set(e.n, (index.get(e.n) || 0) + invoiced * share);
+    }
+  }
+  return index;
 }
 
 function monthsSpanned(orders) {
@@ -90,8 +125,9 @@ function monthsSpanned(orders) {
   return Math.max(1, (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) + 1);
 }
 
-export function oddbrewTotals(orders, cfg) {
-  const rows = orders.map((o) => enrichOddbrew(o, cfg));
+export function oddbrewTotals(orders, cfg, costIndex) {
+  const idx = costIndex || new Map();
+  const rows = orders.map((o) => enrichOddbrew(o, cfg, idx.get(o.orderId)));
   const revenue = rows.reduce((s, o) => s + o.revenue, 0);
   const fees = rows.reduce((s, o) => s + o.fees, 0);
   const cogs = rows.reduce((s, o) => s + o.cogs, 0);
@@ -99,6 +135,8 @@ export function oddbrewTotals(orders, cfg) {
   const months = monthsSpanned(orders);
   const fixed = (cfg.fixedMonthly || 0) * months;
   const units = rows.reduce((s, o) => s + (o.items || []).reduce((a, i) => a + (i.qty || 0), 0), 0);
+  const verifiedRows = rows.filter((o) => o.costBasis === "invoice");
+  const verifiedCost = verifiedRows.reduce((s, o) => s + o.cogs, 0);
   return {
     revenue, fees, cogs, grossProfit,
     fixed, months,
@@ -106,6 +144,9 @@ export function oddbrewTotals(orders, cfg) {
     orders: rows.length,
     units,
     unmatched: rows.reduce((s, o) => s + (o.cogsUnmatched || 0), 0),
+    verifiedOrders: verifiedRows.length,
+    verifiedCost,
+    verifiedPct: cogs > 0 ? (verifiedCost / cogs) * 100 : 0,
     aov: rows.length ? revenue / rows.length : 0,
     margin: revenue > 0 ? (grossProfit / revenue) * 100 : null,
   };
@@ -113,12 +154,13 @@ export function oddbrewTotals(orders, cfg) {
 
 // Per-month revenue and net profit (monthly profit has one month of fixed
 // overhead subtracted, so the bars sum to the net figure).
-export function oddbrewMonthly(orders, cfg) {
+export function oddbrewMonthly(orders, cfg, costIndex) {
+  const idx = costIndex || new Map();
   const map = new Map();
   for (const o of orders) {
     if (!o.date) continue;
     const m = o.date.slice(0, 7);
-    const e = enrichOddbrew(o, cfg);
+    const e = enrichOddbrew(o, cfg, idx.get(o.orderId));
     const cur = map.get(m) || { month: m, revenue: 0, profit: 0, orders: 0 };
     cur.revenue += e.revenue;
     cur.profit += e.profit;
