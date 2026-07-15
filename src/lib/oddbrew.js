@@ -109,6 +109,17 @@ export function findCostRule(name, rules) {
   return (rules || []).find((r) => r.match && n.includes(squash(r.match)));
 }
 
+// The final landed cost for a rule in a region. New rules store costUK/US/EU
+// directly (the sheet's "Final cost"); older rules stored product + shipping,
+// so fall back to their sum for backward compatibility.
+export function ruleCost(rule, region) {
+  if (!rule) return 0;
+  const sum = (a, b) => (Number(a) || 0) + (Number(b) || 0);
+  if (region === "US") return rule.costUS != null ? Number(rule.costUS) || 0 : sum(rule.productCost, rule.shipUS);
+  if (region === "EU") return rule.costEU != null ? Number(rule.costEU) || 0 : sum(rule.productCost, rule.shipEU);
+  return rule.costUK != null ? Number(rule.costUK) || 0 : sum(rule.productCost, rule.shipUK);
+}
+
 // Products to ignore entirely (e.g. items from a previous store on the same
 // Shopify account). Matched by keyword, ignoring case & spaces.
 export function isExcluded(name, cfg) {
@@ -157,8 +168,7 @@ export function orderCogsOddbrew(order, cfg, revenue) {
     const rule = findCostRule(item.name, rules);
     const qty = item.qty || 1;
     if (rule) {
-      const ship = region === "UK" ? rule.shipUK : region === "US" ? rule.shipUS : rule.shipEU;
-      cogs += ((Number(rule.productCost) || 0) + (Number(ship) || 0)) * fx * qty;
+      cogs += ruleCost(rule, region) * fx * qty;
     } else {
       unmatched += qty;
     }

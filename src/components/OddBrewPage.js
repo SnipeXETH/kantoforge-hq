@@ -2,15 +2,15 @@ import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { uid, money, monthLabel } from "../lib/format";
 import { GroupedBars, Legend } from "./charts";
-import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex, parseMetaSpendCsv, unmatchedBreakdown, activeOrders } from "../lib/oddbrew";
+import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex, parseMetaSpendCsv, unmatchedBreakdown, activeOrders, ruleCost } from "../lib/oddbrew";
 import OddBrewInvoices from "./OddBrewInvoices";
 
-// The OMGO cost sheet, ready to seed (USD): [label, match, product, UK, US, EU].
+// The OMGO cost sheet's FINAL landed cost (USD): [label, match, UK, US, Europe].
 const SHEET_SIZES = [
-  ["350ml", "350ml", 3.09, 6.47, 10.74, 9.53],
-  ["250ml", "250ml", 2.50, 5.44, 8.68, 8.06],
-  ["200ml", "200ml", 2.50, 5.29, 8.38, 7.91],
-  ["100ml", "100ml", 2.06, 4.71, 7.94, 7.18],
+  ["350ml", "350ml", 9.56, 13.83, 12.62],
+  ["250ml", "250ml", 7.94, 11.18, 10.56],
+  ["200ml", "200ml", 7.79, 10.88, 10.41],
+  ["100ml", "100ml", 6.77, 10.00, 9.24],
 ];
 
 const MIGRATION = `create table if not exists public.oddbrew_orders (
@@ -146,13 +146,13 @@ export default function OddBrewPage({ user }) {
 
   const rules = cfg.costRules || [];
   const setRules = (next) => setCfg({ ...cfg, costRules: next });
-  const addRule = () => setRules([...rules, { id: uid(), label: "", match: "", productCost: 0, shipUK: 0, shipUS: 0, shipEU: 0 }]);
-  const seedRules = () => setRules(SHEET_SIZES.map(([label, match, productCost, shipUK, shipUS, shipEU]) => ({ id: uid(), label, match, productCost, shipUK, shipUS, shipEU })));
+  const addRule = () => setRules([...rules, { id: uid(), label: "", match: "", costUK: 0, costUS: 0, costEU: 0 }]);
+  const seedRules = () => setRules(SHEET_SIZES.map(([label, match, costUK, costUS, costEU]) => ({ id: uid(), label, match, costUK, costUS, costEU })));
   const addRuleFrom = (name) => {
     const mm = String(name).match(/(\d+)\s*ml/i);
     const match = mm ? mm[0].replace(/\s+/g, "") : String(name).slice(0, 40);
     const label = mm ? mm[1] + "ml" : String(name).slice(0, 20);
-    setRules([...rules, { id: uid(), label, match, productCost: 0, shipUK: 0, shipUS: 0, shipEU: 0 }]);
+    setRules([...rules, { id: uid(), label, match, costUK: 0, costUS: 0, costEU: 0 }]);
   };
   const updateRule = (i, patch) => setRules(rules.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const removeRule = (i) => setRules(rules.filter((_, idx) => idx !== i));
@@ -406,7 +406,7 @@ export default function OddBrewPage({ user }) {
         <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
           <div>
             <h3 style={{ marginBottom: 2 }}>Product costs by size</h3>
-            <div className="muted small">Cost per item = product cost + shipping for the destination. Matched by the size text in each order's variant name.</div>
+            <div className="muted small">Enter the <b>final landed cost</b> per item from your sheet's Final Cost column (product + shipping), for each destination. Matched by the size text in each order's variant name.</div>
           </div>
           <div className="row" style={{ gap: 6 }}>
             {!rules.length && <button className="btn small" onClick={seedRules}>Load OMGO sizes</button>}
@@ -417,16 +417,15 @@ export default function OddBrewPage({ user }) {
         {rules.length > 0 && (
           <div className="table-wrap mt">
             <table className="data">
-              <thead><tr><th>Size</th><th>Variant contains</th><th className="num">Product</th><th className="num">Ship UK</th><th className="num">Ship US</th><th className="num">Ship Europe</th><th></th></tr></thead>
+              <thead><tr><th>Size</th><th>Variant contains</th><th className="num">Final UK</th><th className="num">Final US</th><th className="num">Final Europe</th><th></th></tr></thead>
               <tbody>
                 {rules.map((r, i) => (
                   <tr key={r.id || i}>
                     <td><input type="text" value={r.label} onChange={(e) => updateRule(i, { label: e.target.value })} placeholder="350ml" style={{ width: 76 }} /></td>
                     <td><input type="text" value={r.match} onChange={(e) => updateRule(i, { match: e.target.value })} placeholder="350ml" style={{ width: 110 }} /></td>
-                    <td className="num"><input type="number" step="0.01" value={r.productCost} onChange={(e) => updateRule(i, { productCost: numField(e.target.value) })} style={{ width: 68 }} /></td>
-                    <td className="num"><input type="number" step="0.01" value={r.shipUK} onChange={(e) => updateRule(i, { shipUK: numField(e.target.value) })} style={{ width: 68 }} /></td>
-                    <td className="num"><input type="number" step="0.01" value={r.shipUS} onChange={(e) => updateRule(i, { shipUS: numField(e.target.value) })} style={{ width: 68 }} /></td>
-                    <td className="num"><input type="number" step="0.01" value={r.shipEU} onChange={(e) => updateRule(i, { shipEU: numField(e.target.value) })} style={{ width: 68 }} /></td>
+                    <td className="num"><input type="number" step="0.01" value={r.costUK != null ? r.costUK : ruleCost(r, "UK")} onChange={(e) => updateRule(i, { costUK: numField(e.target.value) })} style={{ width: 68 }} /></td>
+                    <td className="num"><input type="number" step="0.01" value={r.costUS != null ? r.costUS : ruleCost(r, "US")} onChange={(e) => updateRule(i, { costUS: numField(e.target.value) })} style={{ width: 68 }} /></td>
+                    <td className="num"><input type="number" step="0.01" value={r.costEU != null ? r.costEU : ruleCost(r, "EU")} onChange={(e) => updateRule(i, { costEU: numField(e.target.value) })} style={{ width: 68 }} /></td>
                     <td><button className="btn small danger" onClick={() => removeRule(i)}>✕</button></td>
                   </tr>
                 ))}
