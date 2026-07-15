@@ -29,6 +29,9 @@ export const DEFAULT_SETTINGS = {
   // a fixed amount, optionally scoped by platform/region. e.g. fulfilment fees,
   // DDP. Each: { id, label, pct, base, fixed, platform, region, enabled }
   costRules: [],
+  // Which grand total to take from an uploaded fulfilment invoice: 'incl' VAT
+  // or 'excl' VAT (if you reclaim it).
+  fulfilmentVat: "incl",
   // months manually marked "no sales" on the import coverage grid,
   // keyed "YYYY-MM:platform"
   coverageMarks: {},
@@ -60,6 +63,7 @@ function mergeSettings(saved) {
 const TABLE_MAP = [
   ["orders", "orders"],
   ["productCosts", "product_costs"],
+  ["fulfilment", "kf_fulfilment"],
   ["fixedCosts", "fixed_costs"],
   ["tasks", "tasks"],
   ["monthlyFigures", "monthly_figures"],
@@ -157,6 +161,18 @@ export async function fetchDb(currentUserId) {
     may("tasks") ? fetchAll("tasks") : Promise.resolve([]),
   ]);
 
+  // Supplier fulfilment invoices (actual per-order postage/fee/DDP). Guarded so
+  // a not-yet-migrated table doesn't break the whole load — just no actuals.
+  let fulfilment = [];
+  if (may("kf_fulfilment")) {
+    try {
+      const rows = await fetchAll("kf_fulfilment");
+      fulfilment = rows.map((r) => r.data);
+    } catch (e) {
+      if (!tableMissing(e)) throw e;
+    }
+  }
+
   let monthlyFigures = [];
   let monthlyFiguresReady = true;
   let monthlyFiguresError = null;
@@ -202,6 +218,7 @@ export async function fetchDb(currentUserId) {
     users,
     orders: orders.map((r) => r.data),
     productCosts: productCosts.map((r) => r.data),
+    fulfilment,
     fixedCosts: fixedCosts.map((r) => r.data),
     tasks: tasks.map((r) => r.data).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")),
     monthlyFigures,

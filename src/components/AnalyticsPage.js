@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { enrichAll, filterByRange, totals, monthlySeries, productBreakdown, feeBreakdown, monthsSpanned } from "../lib/calc";
+import { buildFulfilmentIndex } from "../lib/fulfilment";
 import { money, pct, monthLabel } from "../lib/format";
 import { GroupedBars, Donut, HBars } from "./charts";
 import { RangePills } from "./Dashboard";
@@ -10,7 +11,8 @@ export default function AnalyticsPage({ db }) {
   const currency = db.settings.currency;
 
   const { t, months, products, fees, pnl, behaviour } = useMemo(() => {
-    const enriched = filterByRange(enrichAll(db.orders, db.settings, db.productCosts), range);
+    const fulfil = buildFulfilmentIndex(db.fulfilment, db.settings.fulfilmentVat);
+    const enriched = filterByRange(enrichAll(db.orders, db.settings, db.productCosts, fulfil), range);
     const t = totals(enriched);
     const months = monthlySeries(enriched).slice(-12);
     const products = productBreakdown(enriched, db.settings, db.productCosts);

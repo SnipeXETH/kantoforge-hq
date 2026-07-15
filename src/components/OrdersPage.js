@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { importCsvText, mergeOrders, FORMAT_LABELS } from "../lib/csv";
 import { enrichAll } from "../lib/calc";
+import { buildFulfilmentIndex } from "../lib/fulfilment";
 import { money, shortDate, monthKey } from "../lib/format";
 import { supabase } from "../lib/supabase";
 
@@ -241,7 +242,7 @@ export default function OrdersPage({ db, update, refetch }) {
   const [page, setPage] = useState(0);
   const currency = db.settings.currency;
 
-  const enriched = useMemo(() => enrichAll(db.orders, db.settings, db.productCosts), [db]);
+  const enriched = useMemo(() => enrichAll(db.orders, db.settings, db.productCosts, buildFulfilmentIndex(db.fulfilment, db.settings.fulfilmentVat)), [db]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

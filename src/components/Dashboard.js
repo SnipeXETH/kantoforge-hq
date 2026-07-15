@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { enrichAll, filterByRange, totals, byPlatform, monthlySeries, monthsSpanned } from "../lib/calc";
+import { buildFulfilmentIndex } from "../lib/fulfilment";
 import { money, pct, monthLabel } from "../lib/format";
 import { GroupedBars, Donut } from "./charts";
 import { ticketsSold, effectiveStatus, compFinancials } from "../lib/comp";
@@ -28,7 +29,8 @@ export default function Dashboard({ db, user, go }) {
   const currency = db.settings.currency;
 
   const { t, plat, months, fixedMonthly, netAfterFixed, openTasks, compLive, compRaised } = useMemo(() => {
-    const enriched = filterByRange(enrichAll(db.orders, db.settings, db.productCosts), range);
+    const fulfil = buildFulfilmentIndex(db.fulfilment, db.settings.fulfilmentVat);
+    const enriched = filterByRange(enrichAll(db.orders, db.settings, db.productCosts, fulfil), range);
     const t = totals(enriched);
     const plat = byPlatform(enriched);
     const months = monthlySeries(enriched).slice(-12);

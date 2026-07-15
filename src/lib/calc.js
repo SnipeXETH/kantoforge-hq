@@ -1,4 +1,5 @@
 import { orderFees, orderCogs } from "./fees";
+import { normOrderNo } from "./fulfilment";
 import { monthKey } from "./format";
 
 // Revenue excludes sales tax (it's collected and remitted, not yours).
@@ -6,17 +7,20 @@ export function orderRevenue(order) {
   return order.itemsTotal - order.discount + order.shipping - (order.refunded || 0);
 }
 
-export function enrichOrder(order, settings, productCosts) {
+// `fulfilment` (optional) is a Map of normalised order number → actual
+// fulfilment cost from an uploaded supplier invoice.
+export function enrichOrder(order, settings, productCosts, fulfilment) {
   const revenue = orderRevenue(order);
   const fees = orderFees(order, settings);
-  const cogs = orderCogs(order, settings, productCosts);
+  const actual = fulfilment ? fulfilment.get(normOrderNo(order.orderId)) : null;
+  const cogs = orderCogs(order, settings, productCosts, actual == null ? null : actual);
   const profit = revenue - fees.total - cogs.total;
   const margin = revenue > 0 ? (profit / revenue) * 100 : null;
   return { ...order, revenue, fees, cogs, profit, margin };
 }
 
-export function enrichAll(orders, settings, productCosts) {
-  return orders.map((o) => enrichOrder(o, settings, productCosts));
+export function enrichAll(orders, settings, productCosts, fulfilment) {
+  return orders.map((o) => enrichOrder(o, settings, productCosts, fulfilment));
 }
 
 export function filterByRange(orders, range) {
@@ -103,7 +107,7 @@ export function productBreakdown(enriched, settings, productCosts) {
   for (const o of enriched) {
     if (!o.items.length) continue;
     const itemValue = o.items.reduce((s, i) => s + i.price * i.qty, 0) || 1;
-    const overhead = o.fees.total + o.cogs.postage + o.cogs.packaging + (o.cogs.variable || 0) + o.discount;
+    const overhead = o.fees.total + o.cogs.postage + o.cogs.packaging + (o.cogs.variable || 0) + (o.cogs.fulfilmentActual || 0) + o.discount;
     for (const item of o.items) {
       const key = item.name;
       let p = byProduct.get(key);

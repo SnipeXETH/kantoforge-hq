@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { uid, money } from "../lib/format";
 import { matchProductCost } from "../lib/fees";
+import FulfilmentInvoices from "./FulfilmentInvoices";
 
 export default function CostsPage({ db, update }) {
   const currency = db.settings.currency;
@@ -252,9 +253,11 @@ export default function CostsPage({ db, update }) {
         )}
         <div className="muted small mt">
           Example — <b>Total Cards fulfilment</b>: 12% of item subtotal. <b>DDP</b>: 10% of item subtotal + £0.50, International only.
-          “International” means any non-UK shipping country. Royal Mail postage stays as the flat per-order figure above until we wire in Cameron's invoice spreadsheet.
+          “International” means any non-UK shipping country. Where a fulfilment invoice is uploaded below, its <b>actual</b> costs are used for those orders instead of these estimates.
         </div>
       </div>
+
+      <FulfilmentInvoices db={db} update={update} />
 
       {unmatchedProducts.length > 0 && (
         <div className="card mt">
