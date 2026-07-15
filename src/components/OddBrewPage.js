@@ -173,24 +173,30 @@ export default function OddBrewPage({ user }) {
   const importAdSpend = async (files) => {
     setErr(null); setMsg(null); setBusy(true);
     try {
-      let n = 0;
-      let total = 0;
-      let span = "";
+      const summary = [];
       let note = null;
       for (const f of Array.from(files || [])) {
-        const parsed = parseMetaSpendCsv(await f.text());
-        const { currency, days } = parsed;
-        if (currency && cur && currency !== cur) note = `Note: CSV is in ${currency}, store is ${cur} — amounts imported as-is.`;
-        for (let i = 0; i < days.length; i += 200) {
-          const chunk = days.slice(i, i + 200).map((d) => ({ id: d.date, data: { date: d.date, amount: d.amount, currency, source: "meta-csv" }, updated_at: new Date().toISOString() }));
-          const { error } = await supabase.from("oddbrew_adspend").upsert(chunk);
+        const p = parseMetaSpendCsv(await f.text());
+        if (p.currency && cur && p.currency !== cur) note = `Note: CSV is in ${p.currency}, store is ${cur} — amounts imported as-is.`;
+        if (p.mode === "daily") {
+          for (let i = 0; i < p.days.length; i += 200) {
+            const chunk = p.days.slice(i, i + 200).map((d) => ({ id: d.date, data: { date: d.date, amount: d.amount, currency: p.currency, source: "meta-csv" }, updated_at: new Date().toISOString() }));
+            const { error } = await supabase.from("oddbrew_adspend").upsert(chunk);
+            if (error) throw new Error(error.message);
+          }
+          summary.push(`${p.days.length} days, ${money(p.total, cur)}`);
+        } else {
+          const fromM = (p.from || "").slice(0, 7);
+          const toM = (p.to || "").slice(0, 7);
+          if (!fromM || fromM !== toM) {
+            throw new Error(`This export covers ${p.from || "?"} → ${p.to || "?"} (more than one month). Set the Meta date range to a single month and export again — then each month's spend is exact. (Or type monthly totals in below.)`);
+          }
+          const { error } = await supabase.from("oddbrew_adspend").upsert({ id: fromM, data: { date: fromM + "-01", month: fromM, amount: p.total, currency: p.currency, source: "meta-csv" }, updated_at: new Date().toISOString() });
           if (error) throw new Error(error.message);
+          summary.push(`${fromM}: ${money(p.total, cur)}`);
         }
-        n += days.length;
-        total += parsed.total || 0;
-        span = parsed.from ? ` (${parsed.from} → ${parsed.to})` : "";
       }
-      setMsg(`${note ? note + " " : ""}Imported ${n} day(s), ${money(total, cur)} total${span}.`);
+      setMsg(`${note ? note + " " : ""}Imported ad spend — ${summary.join("; ")}.`);
       await fetchAdspend();
     } catch (e) {
       setErr(e.message || String(e));
@@ -201,8 +207,8 @@ export default function OddBrewPage({ user }) {
   };
   const addManualSpend = async () => {
     setErr(null);
-    if (!manualDate || manualAmt === "") return setErr("Pick a date and an amount.");
-    const rec = { date: manualDate, amount: parseFloat(manualAmt) || 0, currency: cur, source: "manual" };
+    if (!manualDate || manualAmt === "") return setErr("Pick a month and an amount.");
+    const rec = { date: manualDate + "-01", month: manualDate, amount: parseFloat(manualAmt) || 0, currency: cur, source: "manual" };
     const { error } = await supabase.from("oddbrew_adspend").upsert({ id: manualDate, data: rec, updated_at: new Date().toISOString() });
     if (error) return setErr(error.message);
     setManualDate(""); setManualAmt(""); setMsg("Ad spend saved.");
@@ -438,17 +444,17 @@ export default function OddBrewPage({ user }) {
           <div className="notice mt small">Run <code>supabase/migrations/2026-07-oddbrew-adspend.sql</code> in Supabase, then refresh, to track ad spend.</div>
         ) : (
           <>
-            <div className="muted small mt">Export your daily spend from Meta Ads Manager and drop the CSV here — re-importing the same days just updates them. It comes straight off Net profit.</div>
+            <div className="muted small mt">In Meta Ads Manager set the date range to <b>a single month</b>, export the campaign table (Export → CSV), and drop it here. It reads the total for that month. Re-importing a month just updates it. Comes straight off Net profit. (If your export has a per-day breakdown, that works too.)</div>
             <label className="field mt">
-              <span className="lab">Ads Manager spend CSV (daily breakdown)</span>
+              <span className="lab">Ads Manager spend CSV</span>
               <input ref={adFileRef} type="file" accept=".csv,text/csv" multiple onChange={(e) => importAdSpend(e.target.files)} disabled={busy} />
             </label>
             <div className="form-row">
-              <label className="field"><span className="lab">Or add a day manually</span><input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} /></label>
+              <label className="field"><span className="lab">Or add a month manually</span><input type="month" value={manualDate} onChange={(e) => setManualDate(e.target.value)} /></label>
               <label className="field"><span className="lab">Amount ({cur})</span><input type="number" step="0.01" value={manualAmt} onChange={(e) => setManualAmt(e.target.value)} /></label>
-              <div className="field" style={{ justifyContent: "flex-end" }}><button className="btn" onClick={addManualSpend}>Add day</button></div>
+              <div className="field" style={{ justifyContent: "flex-end" }}><button className="btn" onClick={addManualSpend}>Add</button></div>
             </div>
-            <div className="muted small mt"><b>{money(adSpendRange, cur)}</b> in the selected range · {(adspend || []).length} day(s) recorded total.</div>
+            <div className="muted small mt"><b>{money(adSpendRange, cur)}</b> in the selected range · {(adspend || []).length} entr{(adspend || []).length === 1 ? "y" : "ies"} recorded total.</div>
             {(adspend || []).length > 0 && (
               <div className="table-wrap mt">
                 <table className="data">
@@ -456,7 +462,7 @@ export default function OddBrewPage({ user }) {
                   <tbody>
                     {[...adspend].sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 8).map((s) => (
                       <tr key={s.date}>
-                        <td>{s.date}</td>
+                        <td>{s.month || s.date}</td>
                         <td className="num">{money(s.amount, cur)}</td>
                         <td className="small muted">{s.source === "manual" ? "Manual" : "Meta CSV"}</td>
                         <td className="num"><button className="btn small danger" onClick={() => removeSpendDay(s.date)}>✕</button></td>
