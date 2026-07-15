@@ -74,12 +74,15 @@ module.exports = async (req, res) => {
         res.setHeader("Content-Type", "text/html");
         return res.status(400).send(page("Failed", "<h2>Couldn't verify Shopify's response</h2><p>The security check (HMAC) failed. Please try connecting again.</p>"));
       }
-      const shopParam = params.get("shop");
-      if (shopParam && shopParam !== shop) {
+      // The shop Shopify hands back (HMAC-verified above) is the authoritative
+      // .myshopify.com domain — use it for the exchange and store it, so the
+      // sync uses the real domain regardless of what the env var was set to.
+      const shopParam = (params.get("shop") || "").toLowerCase();
+      if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shopParam)) {
         res.setHeader("Content-Type", "text/html");
-        return res.status(400).send(page("Failed", "<h2>Unexpected store</h2><p>This didn't come from the OddBrew store.</p>"));
+        return res.status(400).send(page("Failed", "<h2>Invalid store</h2><p>Shopify didn't return a valid <code>.myshopify.com</code> store domain.</p>"));
       }
-      const tokenResp = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      const tokenResp = await fetch(`https://${shopParam}/admin/oauth/access_token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code: params.get("code") }),
@@ -90,7 +93,7 @@ module.exports = async (req, res) => {
         return res.status(500).send(page("Failed", "<h2>Token exchange failed</h2><p>" + String(tokenBody.error_description || tokenBody.error || "No token returned").slice(0, 200) + "</p>"));
       }
       const supa = createClient(process.env.REACT_APP_SUPABASE_URL || process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-      await supa.from("oddbrew_secrets").upsert({ id: 1, data: { adminToken: tokenBody.access_token, scope: tokenBody.scope, connectedAt: new Date().toISOString() }, updated_at: new Date().toISOString() });
+      await supa.from("oddbrew_secrets").upsert({ id: 1, data: { adminToken: tokenBody.access_token, shopDomain: shopParam, scope: tokenBody.scope, connectedAt: new Date().toISOString() }, updated_at: new Date().toISOString() });
       // A non-secret "connected" flag the app can read to show status.
       const { data: cfgRow } = await supa.from("oddbrew_config").select("data").eq("id", 1).maybeSingle();
       const config = (cfgRow && cfgRow.data) || {};
