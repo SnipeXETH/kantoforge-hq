@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { uid, money, monthLabel } from "../lib/format";
 import { GroupedBars, Legend } from "./charts";
 import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly } from "../lib/oddbrew";
+import OddBrewInvoices from "./OddBrewInvoices";
 
 // The OMGO cost sheet, ready to seed (USD): [label, match, product, UK, US, EU].
 const SHEET_SIZES = [
@@ -43,6 +44,7 @@ export default function OddBrewPage({ user }) {
   const [orders, setOrders] = useState(null);
   const [cfg, setCfg] = useState(mergeConfig(null));
   const [range, setRange] = useState("all");
+  const [tab, setTab] = useState("overview");
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -192,14 +194,23 @@ export default function OddBrewPage({ user }) {
           <div className="sub">A separate Shopify store — its own orders, costs, revenue &amp; profit.</div>
         </div>
         <div className="pills">
-          {RANGES.map(([k, l]) => (
-            <button key={k} className={range === k ? "active" : ""} onClick={() => setRange(k)}>{l}</button>
-          ))}
+          <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button>
+          <button className={tab === "invoices" ? "active" : ""} onClick={() => setTab("invoices")}>Supplier invoices</button>
         </div>
       </div>
 
       {err && <div className="notice bad mb">⚠️ {err}</div>}
       {msg && <div className="notice good mb">✅ {msg}</div>}
+
+      {tab === "invoices" ? (
+        <OddBrewInvoices user={user} orders={orders || []} cfg={cfg} />
+      ) : (
+      <>
+      <div className="pills mb">
+        {RANGES.map(([k, l]) => (
+          <button key={k} className={range === k ? "active" : ""} onClick={() => setRange(k)}>{l}</button>
+        ))}
+      </div>
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <Stat label="Revenue" value={money(totals.revenue, cur)} sub={`${totals.orders} orders`} />
@@ -342,6 +353,8 @@ export default function OddBrewPage({ user }) {
         )}
         <button className="btn primary mt" onClick={() => saveCfg(cfg)}>Save product costs</button>
       </div>
+      </>
+      )}
     </div>
   );
 }

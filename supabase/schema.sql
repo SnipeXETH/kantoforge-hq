@@ -153,6 +153,12 @@ create table public.oddbrew_secrets (
 );
 insert into public.oddbrew_secrets (id, data) values (1, '{}'::jsonb);
 
+create table public.oddbrew_invoices (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 insert into public.app_settings (id, data) values (1, '{}'::jsonb);
 
 -- ---------------------------------------------------------------------------
@@ -174,6 +180,7 @@ alter table public.print_mockups enable row level security;
 alter table public.oddbrew_orders enable row level security;
 alter table public.oddbrew_config enable row level security;
 alter table public.oddbrew_secrets enable row level security; -- no policies: server-only
+alter table public.oddbrew_invoices enable row level security;
 
 create policy "team can read profiles" on public.profiles
   for select to authenticated using (true);
@@ -207,6 +214,8 @@ create policy "team full access" on public.print_mockups
 create policy "team full access" on public.oddbrew_orders
   for all to authenticated using (true) with check (true);
 create policy "team full access" on public.oddbrew_config
+  for all to authenticated using (true) with check (true);
+create policy "team full access" on public.oddbrew_invoices
   for all to authenticated using (true) with check (true);
 
 -- ---------------------------------------------------------------------------
