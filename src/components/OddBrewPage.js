@@ -1,8 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { money, monthLabel } from "../lib/format";
+import { uid, money, monthLabel } from "../lib/format";
 import { GroupedBars, Legend } from "./charts";
 import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly } from "../lib/oddbrew";
+
+// The OMGO cost sheet, ready to seed (USD): [label, match, product, UK, US, EU].
+const SHEET_SIZES = [
+  ["350ml", "350ml", 3.09, 6.47, 10.74, 9.53],
+  ["250ml", "250ml", 2.50, 5.44, 8.68, 8.06],
+  ["200ml", "200ml", 2.50, 5.29, 8.38, 7.91],
+  ["100ml", "100ml", 2.06, 4.71, 7.94, 7.18],
+];
 
 const MIGRATION = `create table if not exists public.oddbrew_orders (
   id text primary key, order_date timestamptz,
@@ -101,6 +109,13 @@ export default function OddBrewPage({ user }) {
     setCfg(next);
   };
   const numField = (v) => (v === "" ? 0 : parseFloat(v) || 0);
+
+  const rules = cfg.costRules || [];
+  const setRules = (next) => setCfg({ ...cfg, costRules: next });
+  const addRule = () => setRules([...rules, { id: uid(), label: "", match: "", productCost: 0, shipUK: 0, shipUS: 0, shipEU: 0 }]);
+  const seedRules = () => setRules(SHEET_SIZES.map(([label, match, productCost, shipUK, shipUS, shipEU]) => ({ id: uid(), label, match, productCost, shipUK, shipUS, shipEU })));
+  const updateRule = (i, patch) => setRules(rules.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const removeRule = (i) => setRules(rules.filter((_, idx) => idx !== i));
 
   const importFiles = async (files) => {
     setErr(null); setMsg(null); setBusy(true);
@@ -254,7 +269,7 @@ export default function OddBrewPage({ user }) {
 
       <div className="card mt">
         <h3>Costs &amp; fees</h3>
-        <div className="muted small mb">Used to work out profit. OddBrew is Shopify-only, so no Etsy fees here.</div>
+        <div className="muted small mb">Shopify fees + fixed overhead. Per-product costs are set below; the COGS % and cost/order here are optional extras on top.</div>
         <div className="form-row">
           <label className="field"><span className="lab">Store name</span>
             <input type="text" value={cfg.storeName} onChange={(e) => setField(["storeName"], e.target.value)} /></label>
@@ -278,6 +293,54 @@ export default function OddBrewPage({ user }) {
             <input type="number" step="1" value={cfg.fixedMonthly} onChange={(e) => setField(["fixedMonthly"], numField(e.target.value))} /></label>
         </div>
         <button className="btn primary mt" onClick={() => saveCfg(cfg)}>Save costs</button>
+      </div>
+
+      <div className="card mt">
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <h3 style={{ marginBottom: 2 }}>Product costs by size</h3>
+            <div className="muted small">Cost per item = product cost + shipping for the destination. Matched by the size text in each order's variant name.</div>
+          </div>
+          <div className="row" style={{ gap: 6 }}>
+            {!rules.length && <button className="btn small" onClick={seedRules}>Load OMGO sizes</button>}
+            <button className="btn small" onClick={addRule}>+ Add size</button>
+          </div>
+        </div>
+
+        {rules.length > 0 && (
+          <div className="table-wrap mt">
+            <table className="data">
+              <thead><tr><th>Size</th><th>Variant contains</th><th className="num">Product</th><th className="num">Ship UK</th><th className="num">Ship US</th><th className="num">Ship Europe</th><th></th></tr></thead>
+              <tbody>
+                {rules.map((r, i) => (
+                  <tr key={r.id || i}>
+                    <td><input type="text" value={r.label} onChange={(e) => updateRule(i, { label: e.target.value })} placeholder="350ml" style={{ width: 76 }} /></td>
+                    <td><input type="text" value={r.match} onChange={(e) => updateRule(i, { match: e.target.value })} placeholder="350ml" style={{ width: 110 }} /></td>
+                    <td className="num"><input type="number" step="0.01" value={r.productCost} onChange={(e) => updateRule(i, { productCost: numField(e.target.value) })} style={{ width: 68 }} /></td>
+                    <td className="num"><input type="number" step="0.01" value={r.shipUK} onChange={(e) => updateRule(i, { shipUK: numField(e.target.value) })} style={{ width: 68 }} /></td>
+                    <td className="num"><input type="number" step="0.01" value={r.shipUS} onChange={(e) => updateRule(i, { shipUS: numField(e.target.value) })} style={{ width: 68 }} /></td>
+                    <td className="num"><input type="number" step="0.01" value={r.shipEU} onChange={(e) => updateRule(i, { shipEU: numField(e.target.value) })} style={{ width: 68 }} /></td>
+                    <td><button className="btn small danger" onClick={() => removeRule(i)}>✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="form-row mt">
+          <label className="field" style={{ maxWidth: 300 }}>
+            <span className="lab">Cost → store-currency rate</span>
+            <input type="number" step="0.01" value={cfg.costFx} onChange={(e) => setField(["costFx"], numField(e.target.value))} />
+            <span className="hint">Multiplies every cost above. The OMGO sheet is in USD — if the store is in {cur}, set e.g. 0.79. Leave 1 if same currency.</span>
+          </label>
+        </div>
+
+        <div className="muted small mt">Regions: <b>UK</b> = GB · <b>US</b> = US · <b>Europe / rest</b> = everywhere else. Shipping is counted per item.</div>
+        {totals.unmatched > 0 && rules.length > 0 && (
+          <div className="notice mt small">⚠️ {totals.unmatched} sold item(s) didn't match any size rule — their product cost counts as {money(0, cur)}. Add or fix a rule whose "variant contains" text appears in those items.</div>
+        )}
+        <button className="btn primary mt" onClick={() => saveCfg(cfg)}>Save product costs</button>
       </div>
     </div>
   );

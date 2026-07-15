@@ -9,10 +9,52 @@ export const ODDBREW_DEFAULTS = {
   storeName: "OddBrew",
   currency: "GBP",
   shopify: { paymentPct: 1.7, paymentFixed: 0.25 }, // Shopify Payments UK online
-  cogsPct: 0, // cost of goods as % of revenue
-  costPerOrder: 0, // packaging + postage per order
+  cogsPct: 0, // extra cost of goods as % of revenue (optional)
+  costPerOrder: 0, // extra flat cost per order (optional)
   fixedMonthly: 0, // fixed monthly overhead (rent, subs, etc.)
+  // Per-size cost rules: match the size text in the variant name, then product
+  // cost + shipping cost for the destination region (UK / US / EU-rest).
+  costRules: [], // [{ id, label, match, productCost, shipUK, shipUS, shipEU }]
+  costFx: 1, // multiply rule costs by this to convert to the store currency
+  //          e.g. 0.79 if your cost sheet is in USD and the store is in GBP
 };
+
+// Map an order's destination to one of the three shipping-cost regions.
+export function regionOf(country) {
+  const c = (country || "").trim().toUpperCase();
+  if (c === "GB" || c === "UK" || c === "UNITED KINGDOM") return "UK";
+  if (c === "US" || c === "USA" || c === "UNITED STATES") return "US";
+  return "EU"; // everywhere else uses the Europe (FR-example) rate
+}
+
+const REGION_LABEL = { UK: "UK", US: "US", EU: "Europe / rest" };
+export { REGION_LABEL };
+
+// Cost of goods for one order from the size rules: for each line item, find a
+// rule whose `match` text appears in the item name, then add (product cost +
+// region shipping) × quantity. Falls back to the flat/percentage fields.
+export function orderCogsOddbrew(order, cfg, revenue) {
+  const rules = cfg.costRules || [];
+  const fx = cfg.costFx || 1;
+  const region = regionOf(order.country);
+  let cogs = 0;
+  let unmatched = 0;
+  for (const item of order.items || []) {
+    const name = (item.name || "").toLowerCase();
+    const rule = rules.find((r) => r.match && name.includes(String(r.match).toLowerCase()));
+    const qty = item.qty || 1;
+    if (rule) {
+      const ship = region === "UK" ? rule.shipUK : region === "US" ? rule.shipUS : rule.shipEU;
+      cogs += ((Number(rule.productCost) || 0) + (Number(ship) || 0)) * fx * qty;
+    } else {
+      unmatched += qty;
+    }
+  }
+  // optional extras
+  cogs += Number(cfg.costPerOrder) || 0;
+  cogs += Math.max(0, revenue || 0) * ((Number(cfg.cogsPct) || 0) / 100);
+  return { total: cogs, unmatched };
+}
 
 export function mergeConfig(saved) {
   const s = saved || {};
@@ -35,9 +77,9 @@ export function importOddbrewCsv(text) {
 export function enrichOddbrew(order, cfg) {
   const revenue = orderRevenue(order);
   const fees = shopifyFees(order, cfg.shopify || ODDBREW_DEFAULTS.shopify).total;
-  const cogs = Math.max(0, revenue) * ((cfg.cogsPct || 0) / 100) + (cfg.costPerOrder || 0);
-  const profit = revenue - fees - cogs;
-  return { ...order, revenue, fees, cogs, profit };
+  const c = orderCogsOddbrew(order, cfg, revenue);
+  const profit = revenue - fees - c.total;
+  return { ...order, revenue, fees, cogs: c.total, cogsUnmatched: c.unmatched, profit };
 }
 
 function monthsSpanned(orders) {
@@ -63,6 +105,7 @@ export function oddbrewTotals(orders, cfg) {
     net: grossProfit - fixed,
     orders: rows.length,
     units,
+    unmatched: rows.reduce((s, o) => s + (o.cogsUnmatched || 0), 0),
     aov: rows.length ? revenue / rows.length : 0,
     margin: revenue > 0 ? (grossProfit / revenue) * 100 : null,
   };
