@@ -29,12 +29,13 @@ create policy "team full access" on public.oddbrew_config for all to authenticat
 
 const RANGES = [["all", "All time"], ["ytd", "This year"], ["12m", "12 months"], ["90d", "90 days"]];
 
-function Stat({ label, value, sub }) {
+function Stat({ label, value, sub, tone, accent }) {
   return (
-    <div className="card" style={{ margin: 0 }}>
-      <div className="muted small">{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 700, marginTop: 2 }}>{value}</div>
-      {sub != null && <div className="muted small">{sub}</div>}
+    <div className="card" style={{ margin: 0, position: "relative", overflow: "hidden" }}>
+      {accent && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: accent }} />}
+      <div className="muted" style={{ textTransform: "uppercase", letterSpacing: 0.6, fontSize: 10.5, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 27, fontWeight: 750, marginTop: 5, lineHeight: 1.1, color: tone || "var(--text)" }}>{value}</div>
+      {sub != null && <div className="muted small" style={{ marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
@@ -120,6 +121,8 @@ export default function OddBrewPage({ user }) {
 
   const adSpendRange = (adspend || []).filter((s) => dateInRange(s.date)).reduce((sum, s) => sum + (s.amount || 0), 0);
   const netAfterAds = totals.net - adSpendRange;
+  const netMargin = totals.revenue > 0 ? (netAfterAds / totals.revenue) * 100 : null;
+  const netTone = netAfterAds >= 0 ? "var(--good)" : "var(--bad)";
   const monthSpend = {};
   for (const s of adspend || []) { const mk = (s.date || "").slice(0, 7); if (mk) monthSpend[mk] = (monthSpend[mk] || 0) + (s.amount || 0); }
   const monthlyNet = monthly.map((m) => ({ ...m, profit: m.profit - (monthSpend[m.month] || 0) }));
@@ -285,12 +288,12 @@ export default function OddBrewPage({ user }) {
         ))}
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        <Stat label="Revenue" value={money(totals.revenue, cur)} sub={`${totals.orders} orders`} />
-        <Stat label="Gross profit" value={money(totals.grossProfit, cur)} sub={totals.margin != null ? totals.margin.toFixed(1) + "% margin" : "—"} />
-        <Stat label="Ad spend" value={money(adSpendRange, cur)} sub="Meta" />
-        <Stat label="Net profit" value={money(netAfterAds, cur)} sub="after fixed + ads" />
-        <Stat label="Avg order" value={money(totals.aov, cur)} sub={`${totals.units} units`} />
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(158px, 1fr))", gap: 12 }}>
+        <Stat label="Revenue" value={money(totals.revenue, cur)} sub={`${totals.orders} orders · ${money(totals.aov, cur)} avg`} accent="var(--c-revenue)" />
+        <Stat label="Gross profit" value={money(totals.grossProfit, cur)} sub={totals.margin != null ? totals.margin.toFixed(1) + "% gross margin" : "—"} accent="var(--c-profit)" />
+        <Stat label="Ad spend" value={money(adSpendRange, cur)} sub="Meta ads" accent="#e8934a" />
+        <Stat label="Net profit" value={money(netAfterAds, cur)} sub="after fees, cogs, fixed & ads" accent={netTone} tone={netTone} />
+        <Stat label="Net margin" value={netMargin != null ? netMargin.toFixed(1) + "%" : "—"} sub="net profit ÷ revenue" accent={netTone} tone={netTone} />
       </div>
 
       <div className="muted small mt" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
