@@ -130,6 +130,20 @@ create table public.print_mockups (
   updated_at timestamptz not null default now()
 );
 
+-- OddBrew: a separate Shopify store, isolated from KantoForge's orders.
+create table public.oddbrew_orders (
+  id text primary key,
+  order_date timestamptz,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+create table public.oddbrew_config (
+  id int primary key,
+  data jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+insert into public.oddbrew_config (id, data) values (1, '{}'::jsonb);
+
 insert into public.app_settings (id, data) values (1, '{}'::jsonb);
 
 -- ---------------------------------------------------------------------------
@@ -148,6 +162,8 @@ alter table public.competitions enable row level security;
 alter table public.raffle_entries enable row level security;
 alter table public.render_jobs enable row level security;
 alter table public.print_mockups enable row level security;
+alter table public.oddbrew_orders enable row level security;
+alter table public.oddbrew_config enable row level security;
 
 create policy "team can read profiles" on public.profiles
   for select to authenticated using (true);
@@ -177,6 +193,10 @@ create policy "team full access" on public.raffle_entries
 create policy "team full access" on public.render_jobs
   for all to authenticated using (true) with check (true);
 create policy "team full access" on public.print_mockups
+  for all to authenticated using (true) with check (true);
+create policy "team full access" on public.oddbrew_orders
+  for all to authenticated using (true) with check (true);
+create policy "team full access" on public.oddbrew_config
   for all to authenticated using (true) with check (true);
 
 -- ---------------------------------------------------------------------------

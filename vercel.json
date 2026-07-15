@@ -2,12 +2,19 @@
   "functions": {
     "api/sync-shopify.js": {
       "maxDuration": 60
+    },
+    "api/sync-oddbrew.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
     {
       "path": "/api/sync-shopify",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/sync-oddbrew",
+      "schedule": "30 3 * * *"
     }
   ],
   "rewrites": [
