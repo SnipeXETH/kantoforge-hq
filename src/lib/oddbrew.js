@@ -24,10 +24,15 @@ export function parseMetaSpendCsv(text) {
   if (rows.length < 2) throw new Error("That CSV looks empty.");
   const headers = rows[0].map((h) => (h || "").trim());
   const lower = headers.map((h) => h.toLowerCase());
-  const dateCol = lower.findIndex((h) => h === "day" || h === "date" || h.startsWith("reporting starts"));
-  const amtCol = lower.findIndex((h) => h.startsWith("amount spent") || h === "spend" || h === "amount spent" || h === "amount");
+  // Prefer a real per-day column; only fall back to the (constant) reporting
+  // range if there's no day/date column — otherwise every row collapses onto
+  // one date and the whole period lands on a single day.
+  let dateCol = lower.indexOf("day");
+  if (dateCol < 0) dateCol = lower.indexOf("date");
+  if (dateCol < 0) dateCol = lower.findIndex((h) => h.startsWith("reporting starts") || h.startsWith("reporting ends"));
+  const amtCol = lower.findIndex((h) => h.startsWith("amount spent") || h === "spend" || h === "amount");
   if (dateCol < 0 || amtCol < 0) {
-    throw new Error("Couldn't find a date column and an 'Amount spent' column. In Ads Manager, export the report with a day-by-day breakdown.");
+    throw new Error("Couldn't find a 'Day' column and an 'Amount spent' column. In Ads Manager, add a Day breakdown to the report before exporting (Columns → Customise → Breakdown → By Day).");
   }
   const m = headers[amtCol].match(/\(([A-Za-z]{3})\)/);
   const currency = m ? m[1].toUpperCase() : null;
@@ -39,7 +44,16 @@ export function parseMetaSpendCsv(text) {
     if (!day || isNaN(amt)) continue;
     byDay.set(day, (byDay.get(day) || 0) + amt);
   }
-  return { currency, days: Array.from(byDay.entries()).map(([date, amount]) => ({ date, amount: +amount.toFixed(2) })) };
+  const days = Array.from(byDay.entries()).map(([date, amount]) => ({ date, amount: +amount.toFixed(2) }));
+  // Guard against a report with no per-day breakdown collapsing onto one date.
+  if (days.length <= 1 && rows.length - 1 > 3) {
+    throw new Error("This export collapsed onto a single date — it has no day-by-day breakdown. In Ads Manager add the 'Day' breakdown (or an equivalent daily report), then export again.");
+  }
+  days.sort((a, b) => a.date.localeCompare(b.date));
+  const total = +days.reduce((s, d) => s + d.amount, 0).toFixed(2);
+  const from = days.length ? days[0].date : null;
+  const to = days.length ? days[days.length - 1].date : null;
+  return { currency, days, total, from, to };
 }
 
 export const ODDBREW_DEFAULTS = {
