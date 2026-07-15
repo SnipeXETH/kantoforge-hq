@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { money } from "../lib/format";
 import { activeOrders } from "../lib/oddbrew";
-import { salesByVariant, mergeInventory, analysisTotals, isAnalysed } from "../lib/oddbrewAnalysis";
+import { salesByVariant, mergeInventory, analysisTotals } from "../lib/oddbrewAnalysis";
 
 const RANGES = [["all", "All time"], ["12m", "12 months"], ["90d", "90 days"]];
 
@@ -64,39 +64,37 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
   const sales = salesByVariant(active, cfg);
   const allRows = mergeInventory(sales, inv, { leadDays, targetCover });
 
-  // Distinct product lines actually present in the data (Signature, Studio,
-  // Galactic, …). The variant name is "Product — Colour / Size", so the product
-  // line is the part before the first separator.
+  // Per-variant hide list, keyed by the variant's stable key. Everything shows
+  // by default; you hide the ones you no longer sell.
+  const hidden = new Set(cfg.hiddenVariants || []);
+  const rows = allRows.filter((r) => !hidden.has(r.key));
+  const hiddenRows = allRows.filter((r) => hidden.has(r.key));
+  const totals = analysisTotals(rows);
+
+  // Product lines (Signature, Studio, Galactic, …) as a quick bulk toggle: the
+  // product line is the part of the variant name before the first separator.
   const lineMap = new Map();
   for (const r of allRows) {
     const p = productLine(r.name);
-    const cur = lineMap.get(p) || { name: p, units: 0, variants: 0 };
+    const cur = lineMap.get(p) || { name: p, units: 0, keys: [] };
     cur.units += r.units;
-    cur.variants += 1;
+    cur.keys.push(r.key);
     lineMap.set(p, cur);
   }
-  const lines = Array.from(lineMap.values()).sort((a, b) => b.units - a.units);
-
-  // Which lines to analyse. Unconfigured → auto-pick the ones that look current
-  // (Signature/Studio); if none match, show everything so the table is never
-  // mysteriously empty. The chip picker below lets you set it explicitly.
-  const autoDefault = lines.filter((l) => /signature|studio/i.test(l.name)).map((l) => l.name);
-  const include = cfg.analysisInclude !== undefined
-    ? cfg.analysisInclude
-    : (autoDefault.length ? autoDefault : lines.map((l) => l.name));
-
-  const rows = allRows.filter((r) => isAnalysed(r.name, include));
-  const hiddenCount = allRows.length - rows.length;
-  const totals = analysisTotals(rows);
+  const lines = Array.from(lineMap.values())
+    .map((l) => ({ ...l, on: l.keys.some((k) => !hidden.has(k)) }))
+    .sort((a, b) => b.units - a.units);
 
   const setStock = (patch) => saveCfg({ ...cfg, stock: { ...stock, ...patch } });
-  const setInclude = (list) => saveCfg({ ...cfg, analysisInclude: list });
-  const lineOn = (name) => isAnalysed(name, include);
-  const toggleLine = (name) => {
-    const set = new Set(lines.filter((l) => lineOn(l.name)).map((l) => l.name));
-    if (set.has(name)) set.delete(name); else set.add(name);
-    setInclude([...set]);
+  const setHidden = (keys) => saveCfg({ ...cfg, hiddenVariants: keys });
+  const hideKeys = (keys, hide) => {
+    const set = new Set(cfg.hiddenVariants || []);
+    keys.forEach((k) => (hide ? set.add(k) : set.delete(k)));
+    setHidden([...set]);
   };
+  const toggleRow = (key) => hideKeys([key], !hidden.has(key));
+  const toggleLine = (l) => hideKeys(l.keys, l.on); // any shown → hide all; else show all
+  const showAll = () => setHidden([]);
 
   // Persist one variant's manual counts. Merge onto any Shopify-synced fields so
   // a later stock sync (which keeps manual fields) and this stay consistent.
@@ -173,26 +171,20 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
         </div>
         {syncResult && <div className="notice good mt small">{syncResult}</div>}
 
-        {lines.length > 0 && (
+        {lines.length > 1 && (
           <div className="mt">
             <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>
-              <span className="lab">Product lines to analyse</span>
-              <span className="muted small">
-                <button type="button" style={textBtn} onClick={() => setInclude(lines.map((l) => l.name))}>All</button>
-                {autoDefault.length ? <> · <button type="button" style={textBtn} onClick={() => setInclude(autoDefault)}>Signature + Studio</button></> : null}
-              </span>
+              <span className="lab">Quick filter by product line</span>
+              <button type="button" style={textBtn} onClick={showAll}>Show all</button>
             </div>
             <div className="row mt" style={{ flexWrap: "wrap", gap: 6 }}>
-              {lines.map((l) => {
-                const on = lineOn(l.name);
-                return (
-                  <button key={l.name} type="button" onClick={() => toggleLine(l.name)} style={chipStyle(on)}>
-                    {on ? "✓ " : ""}{l.name} <span style={{ opacity: 0.6, fontWeight: 500 }}>· {l.units}</span>
-                  </button>
-                );
-              })}
+              {lines.map((l) => (
+                <button key={l.name} type="button" onClick={() => toggleLine(l)} style={chipStyle(l.on)}>
+                  {l.on ? "✓ " : ""}{l.name} <span style={{ opacity: 0.6, fontWeight: 500 }}>· {l.units}</span>
+                </button>
+              ))}
             </div>
-            <div className="hint mt">Tick the lines you still sell — discontinued ones drop out of the table and the totals above.{hiddenCount ? ` ${hiddenCount} variant${hiddenCount === 1 ? "" : "s"} hidden.` : ""}</div>
+            <div className="hint mt">Click a line to hide/show all its variants at once — or use the Hide button on any row below for individual control.</div>
           </div>
         )}
 
@@ -224,6 +216,7 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
                   <th className="num">Reorder&nbsp;pt</th>
                   <th className="num">Cover</th>
                   <th className="num">Suggest buy</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -245,13 +238,38 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
                     <td className="num"><input type="number" step="1" value={r.reorderPoint == null ? "" : r.reorderPoint} onChange={(e) => saveRow(r, { reorderPoint: numOrNull(e.target.value) })} style={{ width: 62 }} placeholder="—" /></td>
                     <td className="num">{coverLabel(r.daysCover)}</td>
                     <td className="num">{r.suggested > 0 ? <span className="badge amber">+{r.suggested}</span> : <span className="muted">—</span>}</td>
+                    <td className="num"><button className="btn small" title="Hide — I don't sell this variant" onClick={() => toggleRow(r.key)}>Hide</button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        ) : allRows.length ? (
+          <div className="muted mt">Every variant is hidden. <button type="button" style={textBtn} onClick={showAll}>Show all</button> to bring them back.</div>
         ) : (
           <div className="muted mt">No sales yet — sync the store or import a CSV on the Overview tab.</div>
+        )}
+
+        {hiddenRows.length > 0 && (
+          <details className="mt">
+            <summary className="muted small" style={{ cursor: "pointer" }}>
+              Hidden — not selling ({hiddenRows.length}){" "}
+              <button type="button" style={textBtn} onClick={(e) => { e.preventDefault(); showAll(); }}>restore all</button>
+            </summary>
+            <div className="table-wrap mt">
+              <table className="data">
+                <tbody>
+                  {hiddenRows.map((r) => (
+                    <tr key={r.key} style={{ opacity: 0.65 }}>
+                      <td>{r.name}{r.sku ? <> · <code>{r.sku}</code></> : null}</td>
+                      <td className="num muted small">{r.units} sold</td>
+                      <td className="num"><button className="btn small" onClick={() => toggleRow(r.key)}>Restore</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
         )}
 
         <div className="muted small mt">
