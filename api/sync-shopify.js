@@ -84,11 +84,16 @@ function mapOrder(o) {
   // (and usually carry an etsy-ish source_name) — they belong to the Etsy
   // channel and its fee model.
   const isEtsy = /(^|,)\s*etsy\s*(,|$)/i.test(o.tags || "") || /etsy/i.test(o.source_name || "");
+  const country =
+    (o.shipping_address && o.shipping_address.country_code) ||
+    (o.billing_address && o.billing_address.country_code) ||
+    "";
   return {
     id: "shopify:" + o.name,
     platform: isEtsy ? "etsy" : "shopify",
     channelVia: "shopify",
     orderId: o.name,
+    country,
     date: o.created_at ? new Date(o.created_at).toISOString() : null,
     currency: o.currency || "GBP",
     itemsTotal: parseFloat(o.subtotal_price) || 0, // discount-inclusive, like the CSV export
