@@ -174,9 +174,12 @@ export default function OddBrewPage({ user }) {
     setErr(null); setMsg(null); setBusy(true);
     try {
       let n = 0;
+      let total = 0;
+      let span = "";
       let note = null;
       for (const f of Array.from(files || [])) {
-        const { currency, days } = parseMetaSpendCsv(await f.text());
+        const parsed = parseMetaSpendCsv(await f.text());
+        const { currency, days } = parsed;
         if (currency && cur && currency !== cur) note = `Note: CSV is in ${currency}, store is ${cur} — amounts imported as-is.`;
         for (let i = 0; i < days.length; i += 200) {
           const chunk = days.slice(i, i + 200).map((d) => ({ id: d.date, data: { date: d.date, amount: d.amount, currency, source: "meta-csv" }, updated_at: new Date().toISOString() }));
@@ -184,8 +187,10 @@ export default function OddBrewPage({ user }) {
           if (error) throw new Error(error.message);
         }
         n += days.length;
+        total += parsed.total || 0;
+        span = parsed.from ? ` (${parsed.from} → ${parsed.to})` : "";
       }
-      setMsg(note ? note + ` Imported ${n} day(s).` : `Imported ${n} day(s) of ad spend.`);
+      setMsg(`${note ? note + " " : ""}Imported ${n} day(s), ${money(total, cur)} total${span}.`);
       await fetchAdspend();
     } catch (e) {
       setErr(e.message || String(e));
