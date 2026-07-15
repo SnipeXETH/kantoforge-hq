@@ -4,6 +4,7 @@ import { uid, money, monthLabel } from "../lib/format";
 import { GroupedBars, Legend } from "./charts";
 import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex, parseMetaSpendCsv, unmatchedBreakdown, activeOrders, ruleCost } from "../lib/oddbrew";
 import OddBrewInvoices from "./OddBrewInvoices";
+import OddBrewAnalysis from "./OddBrewAnalysis";
 
 // The OMGO cost sheet's FINAL landed cost (USD): [label, match, UK, US, Europe].
 const SHEET_SIZES = [
@@ -280,6 +281,7 @@ export default function OddBrewPage({ user }) {
         </div>
         <div className="pills">
           <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button>
+          <button className={tab === "analysis" ? "active" : ""} onClick={() => setTab("analysis")}>Stock &amp; analysis</button>
           <button className={tab === "invoices" ? "active" : ""} onClick={() => setTab("invoices")}>Supplier invoices</button>
         </div>
       </div>
@@ -289,6 +291,8 @@ export default function OddBrewPage({ user }) {
 
       {tab === "invoices" ? (
         <OddBrewInvoices user={user} orders={orders || []} cfg={cfg} />
+      ) : tab === "analysis" ? (
+        <OddBrewAnalysis orders={orders || []} cfg={cfg} connected={connected} saveCfg={saveCfg} />
       ) : (
       <>
       <div className="pills mb">

@@ -165,6 +165,14 @@ create table public.oddbrew_adspend (
   updated_at timestamptz not null default now()
 );
 
+-- One row per variant (id = the portal's variant key). Manual stock counts +
+-- the last-synced Shopify level.
+create table public.oddbrew_inventory (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 insert into public.app_settings (id, data) values (1, '{}'::jsonb);
 
 -- ---------------------------------------------------------------------------
@@ -188,6 +196,7 @@ alter table public.oddbrew_config enable row level security;
 alter table public.oddbrew_secrets enable row level security; -- no policies: server-only
 alter table public.oddbrew_invoices enable row level security;
 alter table public.oddbrew_adspend enable row level security;
+alter table public.oddbrew_inventory enable row level security;
 
 create policy "team can read profiles" on public.profiles
   for select to authenticated using (true);
@@ -225,6 +234,8 @@ create policy "team full access" on public.oddbrew_config
 create policy "team full access" on public.oddbrew_invoices
   for all to authenticated using (true) with check (true);
 create policy "team full access" on public.oddbrew_adspend
+  for all to authenticated using (true) with check (true);
+create policy "team full access" on public.oddbrew_inventory
   for all to authenticated using (true) with check (true);
 
 -- ---------------------------------------------------------------------------
