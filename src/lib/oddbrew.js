@@ -100,6 +100,28 @@ export function regionOf(country) {
 const REGION_LABEL = { UK: "UK", US: "US", EU: "Europe / rest" };
 export { REGION_LABEL };
 
+// Match a variant name to a cost rule, ignoring case and whitespace, so "350ml"
+// matches "350 ml", "350ML", etc.
+const squash = (s) => String(s || "").toLowerCase().replace(/\s+/g, "");
+export function findCostRule(name, rules) {
+  const n = squash(name);
+  return (rules || []).find((r) => r.match && n.includes(squash(r.match)));
+}
+
+// Distinct sold items that don't match any rule, with total quantity.
+export function unmatchedBreakdown(orders, cfg) {
+  const rules = cfg.costRules || [];
+  const map = new Map();
+  for (const o of orders || []) {
+    for (const it of o.items || []) {
+      if (findCostRule(it.name, rules)) continue;
+      const name = it.name || "(unnamed)";
+      map.set(name, (map.get(name) || 0) + (it.qty || 1));
+    }
+  }
+  return Array.from(map.entries()).map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty);
+}
+
 // Cost of goods for one order from the size rules: for each line item, find a
 // rule whose `match` text appears in the item name, then add (product cost +
 // region shipping) × quantity. Falls back to the flat/percentage fields.
@@ -110,8 +132,7 @@ export function orderCogsOddbrew(order, cfg, revenue) {
   let cogs = 0;
   let unmatched = 0;
   for (const item of order.items || []) {
-    const name = (item.name || "").toLowerCase();
-    const rule = rules.find((r) => r.match && name.includes(String(r.match).toLowerCase()));
+    const rule = findCostRule(item.name, rules);
     const qty = item.qty || 1;
     if (rule) {
       const ship = region === "UK" ? rule.shipUK : region === "US" ? rule.shipUS : rule.shipEU;
