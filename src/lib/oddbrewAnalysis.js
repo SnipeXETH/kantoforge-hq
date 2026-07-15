@@ -6,6 +6,16 @@ import { regionOf, isExcluded } from "./oddbrew";
 
 const squash = (s) => String(s || "").toLowerCase().replace(/\s+/g, "");
 
+// Analysis allow-list. When `include` has any keywords, only variants whose
+// name contains one of them count in the Stock & analysis tab — so discontinued
+// lines drop out. Empty list = include everything (backward compatible).
+export function isAnalysed(name, include) {
+  const list = include || [];
+  if (!list.length) return true;
+  const n = squash(name);
+  return list.some((k) => k && n.includes(squash(k)));
+}
+
 // A stable key for a sold line / a stock item. SKU wins when present (it's what
 // the supplier and Shopify agree on); otherwise fall back to the variant name.
 export function variantKey(item) {
