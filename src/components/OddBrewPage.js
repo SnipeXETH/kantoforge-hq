@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { uid, money, monthLabel } from "../lib/format";
 import { GroupedBars, Legend } from "./charts";
-import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex, parseMetaSpendCsv } from "../lib/oddbrew";
+import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex, parseMetaSpendCsv, unmatchedBreakdown } from "../lib/oddbrew";
 import OddBrewInvoices from "./OddBrewInvoices";
 
 // The OMGO cost sheet, ready to seed (USD): [label, match, product, UK, US, EU].
@@ -126,6 +126,7 @@ export default function OddBrewPage({ user }) {
   const monthSpend = {};
   for (const s of adspend || []) { const mk = (s.date || "").slice(0, 7); if (mk) monthSpend[mk] = (monthSpend[mk] || 0) + (s.amount || 0); }
   const monthlyNet = monthly.map((m) => ({ ...m, profit: m.profit - (monthSpend[m.month] || 0) }));
+  const unmatchedItems = unmatchedBreakdown(shown, cfg);
 
   const saveCfg = async (next) => {
     setErr(null);
@@ -146,6 +147,12 @@ export default function OddBrewPage({ user }) {
   const setRules = (next) => setCfg({ ...cfg, costRules: next });
   const addRule = () => setRules([...rules, { id: uid(), label: "", match: "", productCost: 0, shipUK: 0, shipUS: 0, shipEU: 0 }]);
   const seedRules = () => setRules(SHEET_SIZES.map(([label, match, productCost, shipUK, shipUS, shipEU]) => ({ id: uid(), label, match, productCost, shipUK, shipUS, shipEU })));
+  const addRuleFrom = (name) => {
+    const mm = String(name).match(/(\d+)\s*ml/i);
+    const match = mm ? mm[0].replace(/\s+/g, "") : String(name).slice(0, 40);
+    const label = mm ? mm[1] + "ml" : String(name).slice(0, 20);
+    setRules([...rules, { id: uid(), label, match, productCost: 0, shipUK: 0, shipUS: 0, shipEU: 0 }]);
+  };
   const updateRule = (i, patch) => setRules(rules.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const removeRule = (i) => setRules(rules.filter((_, idx) => idx !== i));
 
@@ -434,9 +441,25 @@ export default function OddBrewPage({ user }) {
           </label>
         </div>
 
-        <div className="muted small mt">Regions: <b>UK</b> = GB · <b>US</b> = US · <b>Europe / rest</b> = everywhere else. Shipping is counted per item.</div>
+        <div className="muted small mt">Regions: <b>UK</b> = GB · <b>US</b> = US · <b>Europe / rest</b> = everywhere else. Shipping is counted per item. Matching ignores case &amp; spaces.</div>
         {totals.unmatched > 0 && rules.length > 0 && (
-          <div className="notice mt small">⚠️ {totals.unmatched} sold item(s) didn't match any size rule — their product cost counts as {money(0, cur)}. Add or fix a rule whose "variant contains" text appears in those items.</div>
+          <div className="notice mt small">
+            ⚠️ {totals.unmatched} sold item(s) didn't match any size rule — counted as {money(0, cur)}. Here's exactly what's unmatched — hit <b>+ rule</b> to add one (it prefills the size, then set the costs):
+            <div className="table-wrap mt" style={{ maxHeight: 240, overflowY: "auto" }}>
+              <table className="data">
+                <thead><tr><th>Unmatched variant</th><th className="num">Qty</th><th></th></tr></thead>
+                <tbody>
+                  {unmatchedItems.map((u) => (
+                    <tr key={u.name}>
+                      <td className="small">{u.name}</td>
+                      <td className="num">{u.qty}</td>
+                      <td className="num"><button className="btn small" onClick={() => addRuleFrom(u.name)}>+ rule</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
         <button className="btn primary mt" onClick={() => saveCfg(cfg)}>Save product costs</button>
       </div>

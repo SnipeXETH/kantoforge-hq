@@ -1,7 +1,7 @@
 // Parse an OMGO / Nanning Youkeshu supplier invoice (.xlsx) and reconcile it
 // against OddBrew's orders and cost rules. xlsx is loaded lazily so it never
 // weighs down the main bundle.
-import { regionOf } from "./oddbrew";
+import { regionOf, findCostRule } from "./oddbrew";
 import { orderRevenue } from "./calc";
 
 const norm = (v) =>
@@ -120,8 +120,7 @@ function expectedForItems(items, country, rules) {
   for (const it of items) {
     const qty = it.qty || 1;
     units += qty;
-    const name = (it.name || "").toLowerCase();
-    const rule = rules.find((r) => r.match && name.includes(String(r.match).toLowerCase()));
+    const rule = findCostRule(it.name, rules);
     if (rule) {
       const ship = region === "UK" ? rule.shipUK : region === "US" ? rule.shipUS : rule.shipEU;
       total += ((Number(rule.productCost) || 0) + (Number(ship) || 0)) * qty;
