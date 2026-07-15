@@ -18,42 +18,55 @@ function normalizeDay(v) {
   return isNaN(d) ? null : d.toISOString().slice(0, 10);
 }
 
-// Parse a Meta Ads Manager spend export (daily breakdown) into per-day totals.
+// Parse a Meta Ads Manager spend export. Two shapes are supported:
+//  - a daily breakdown (a "Day"/"Date" column) → per-day totals, or
+//  - a campaign table (no Day column, but "Reporting starts/ends") → a single
+//    period total, which the caller files against the month it covers.
 export function parseMetaSpendCsv(text) {
   const rows = parseCSV(text);
   if (rows.length < 2) throw new Error("That CSV looks empty.");
   const headers = rows[0].map((h) => (h || "").trim());
   const lower = headers.map((h) => h.toLowerCase());
-  // Prefer a real per-day column; only fall back to the (constant) reporting
-  // range if there's no day/date column — otherwise every row collapses onto
-  // one date and the whole period lands on a single day.
-  let dateCol = lower.indexOf("day");
-  if (dateCol < 0) dateCol = lower.indexOf("date");
-  if (dateCol < 0) dateCol = lower.findIndex((h) => h.startsWith("reporting starts") || h.startsWith("reporting ends"));
+  let dayCol = lower.indexOf("day");
+  if (dayCol < 0) dayCol = lower.indexOf("date");
+  const startCol = lower.findIndex((h) => h.startsWith("reporting starts"));
+  const endCol = lower.findIndex((h) => h.startsWith("reporting ends"));
   const amtCol = lower.findIndex((h) => h.startsWith("amount spent") || h === "spend" || h === "amount");
-  if (dateCol < 0 || amtCol < 0) {
-    throw new Error("Couldn't find a 'Day' column and an 'Amount spent' column. In Ads Manager, add a Day breakdown to the report before exporting (Columns → Customise → Breakdown → By Day).");
-  }
+  if (amtCol < 0) throw new Error("Couldn't find an 'Amount spent' column in this export.");
   const m = headers[amtCol].match(/\(([A-Za-z]{3})\)/);
   const currency = m ? m[1].toUpperCase() : null;
-  const byDay = new Map();
+  const amtOf = (r) => parseFloat(String(r[amtCol] == null ? "" : r[amtCol]).replace(/[£$€,\s]/g, ""));
+
+  if (dayCol >= 0) {
+    const byDay = new Map();
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const day = normalizeDay(r[dayCol]);
+      const amt = amtOf(r);
+      if (!day || isNaN(amt)) continue;
+      byDay.set(day, (byDay.get(day) || 0) + amt);
+    }
+    const days = Array.from(byDay.entries()).map(([date, amount]) => ({ date, amount: +amount.toFixed(2) })).sort((a, b) => a.date.localeCompare(b.date));
+    if (days.length <= 1 && rows.length - 1 > 3) {
+      throw new Error("This export collapsed onto a single date — it has no real day-by-day breakdown.");
+    }
+    return { mode: "daily", currency, days, total: +days.reduce((s, d) => s + d.amount, 0).toFixed(2), from: days[0] && days[0].date, to: days.length ? days[days.length - 1].date : null };
+  }
+
+  // Campaign table (no Day column): sum spend, read the reporting window.
+  let total = 0, from = null, to = null;
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i] || [];
-    const day = normalizeDay(r[dateCol]);
-    const amt = parseFloat(String(r[amtCol] == null ? "" : r[amtCol]).replace(/[£$€,\s]/g, ""));
-    if (!day || isNaN(amt)) continue;
-    byDay.set(day, (byDay.get(day) || 0) + amt);
+    const a = amtOf(r);
+    if (!isNaN(a)) total += a;
+    const s = startCol >= 0 ? normalizeDay(r[startCol]) : null;
+    const e = endCol >= 0 ? normalizeDay(r[endCol]) : null;
+    if (s && (!from || s < from)) from = s;
+    if (e && (!to || e > to)) to = e;
   }
-  const days = Array.from(byDay.entries()).map(([date, amount]) => ({ date, amount: +amount.toFixed(2) }));
-  // Guard against a report with no per-day breakdown collapsing onto one date.
-  if (days.length <= 1 && rows.length - 1 > 3) {
-    throw new Error("This export collapsed onto a single date — it has no day-by-day breakdown. In Ads Manager add the 'Day' breakdown (or an equivalent daily report), then export again.");
-  }
-  days.sort((a, b) => a.date.localeCompare(b.date));
-  const total = +days.reduce((s, d) => s + d.amount, 0).toFixed(2);
-  const from = days.length ? days[0].date : null;
-  const to = days.length ? days[days.length - 1].date : null;
-  return { currency, days, total, from, to };
+  total = +total.toFixed(2);
+  if (!total) throw new Error("Couldn't read any spend from this export.");
+  return { mode: "period", currency, total, from, to };
 }
 
 export const ODDBREW_DEFAULTS = {
