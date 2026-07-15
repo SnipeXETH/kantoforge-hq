@@ -4,19 +4,19 @@
 
 export const ALL_PAGES = [
   "dashboard", "analytics", "monthly", "orders", "costs", "pricing",
-  "commissions", "studio", "raffles", "tasks", "printshop", "team", "settings",
+  "commissions", "studio", "raffles", "tasks", "printshop", "oddbrew", "team", "settings",
 ];
 
 export const PAGE_LABELS = {
   dashboard: "Dashboard", analytics: "Analytics", monthly: "Monthly figures",
   orders: "Orders", costs: "Costs", pricing: "Pricing calculator",
   commissions: "Commissions", studio: "Product images", raffles: "Competitions", tasks: "Tasks",
-  printshop: "Print shop", team: "Team", settings: "Settings",
+  printshop: "Print shop", oddbrew: "OddBrew", team: "Team", settings: "Settings",
 };
 
 // Private sections: hidden from EVERYONE (including admins) unless a user is
 // explicitly granted access. This is how we lock a section to a named few.
-export const RESTRICTED_PAGES = ["printshop"];
+export const RESTRICTED_PAGES = ["printshop", "oddbrew"];
 const isRestricted = (p) => RESTRICTED_PAGES.includes(p);
 
 // Which Supabase tables each page needs — used to minimise what a limited
@@ -33,6 +33,7 @@ export const PAGE_TABLES = {
   raffles: ["competitions", "raffle_entries"],
   tasks: ["tasks"],
   printshop: [], // its mockups live in their own table, fetched by the page
+  oddbrew: [], // its orders/config live in their own tables, fetched by the page
   team: [],
   settings: [],
 };
