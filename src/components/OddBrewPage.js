@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { uid, money, monthLabel } from "../lib/format";
 import { GroupedBars, Legend } from "./charts";
-import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly } from "../lib/oddbrew";
+import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex } from "../lib/oddbrew";
 import OddBrewInvoices from "./OddBrewInvoices";
 
 // The OMGO cost sheet, ready to seed (USD): [label, match, product, UK, US, EU].
@@ -42,6 +42,7 @@ function Stat({ label, value, sub }) {
 export default function OddBrewPage({ user }) {
   const [ready, setReady] = useState(true);
   const [orders, setOrders] = useState(null);
+  const [invoices, setInvoices] = useState([]);
   const [cfg, setCfg] = useState(mergeConfig(null));
   const [range, setRange] = useState("all");
   const [tab, setTab] = useState("overview");
@@ -75,7 +76,14 @@ export default function OddBrewPage({ user }) {
     setConnected(!!(raw && raw.shopifyConnected));
   };
 
-  useEffect(() => { fetchOrders(); fetchConfig(); }, []);
+  const fetchInvoices = async () => {
+    const { data, error } = await supabase.from("oddbrew_invoices").select("id,data");
+    if (!error) setInvoices((data || []).map((r) => ({ id: r.id, ...r.data })));
+  };
+
+  useEffect(() => { fetchOrders(); fetchConfig(); fetchInvoices(); }, []);
+  // Refresh invoices when returning to the overview (they drive actual costs).
+  useEffect(() => { if (tab === "overview") fetchInvoices(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
   // Re-check connection when returning from the Shopify OAuth tab.
   useEffect(() => {
     const onFocus = () => fetchConfig();
@@ -93,9 +101,10 @@ export default function OddBrewPage({ user }) {
     return now - d <= days * 86400000;
   };
 
+  const costIndex = buildInvoiceCostIndex(invoices, orders || [], cfg);
   const shown = (orders || []).filter(inRange);
-  const totals = oddbrewTotals(shown, cfg);
-  const monthly = oddbrewMonthly(shown, cfg);
+  const totals = oddbrewTotals(shown, cfg, costIndex);
+  const monthly = oddbrewMonthly(shown, cfg, costIndex);
 
   const saveCfg = async (next) => {
     setErr(null);
@@ -217,6 +226,16 @@ export default function OddBrewPage({ user }) {
         <Stat label="Gross profit" value={money(totals.grossProfit, cur)} sub={totals.margin != null ? totals.margin.toFixed(1) + "% margin" : "—"} />
         <Stat label="Net profit" value={money(totals.net, cur)} sub={`after ${money(totals.fixed, cur)} fixed`} />
         <Stat label="Avg order" value={money(totals.aov, cur)} sub={`${totals.units} units`} />
+      </div>
+
+      <div className="muted small mt" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span>Cost of goods: <b>{money(totals.cogs, cur)}</b></span>
+        {totals.cogs > 0 && (
+          <span className={"badge " + (totals.verifiedPct >= 99 ? "green" : totals.verifiedPct > 0 ? "blue" : "gray")}>
+            {Math.round(totals.verifiedPct)}% invoice-verified
+          </span>
+        )}
+        <span className="muted">· {totals.verifiedOrders}/{totals.orders} orders costed from invoices, the rest estimated from your size rules.</span>
       </div>
 
       <div className="card mt">
