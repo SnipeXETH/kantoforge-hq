@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { money } from "../lib/format";
-import { parseFulfilmentInvoice, fulfilmentActual, normOrderNo } from "../lib/fulfilment";
+import { parseFulfilmentInvoice, fulfilmentActual, normOrderNo, invoiceAverages } from "../lib/fulfilment";
 
 // Upload a Total Cards "Detailed" invoice (.xlsx) → attach the real per-order
 // fulfilment cost (Royal Mail + Total Cards fee + DDP) to matching orders.
@@ -13,7 +13,7 @@ export default function FulfilmentInvoices({ db, update }) {
   const [err, setErr] = useState(null);
   const [note, setNote] = useState(null);
 
-  const fulfilment = db.fulfilment || [];
+  const fulfilment = useMemo(() => db.fulfilment || [], [db.fulfilment]);
   const orderNos = useMemo(() => new Set((db.orders || []).map((o) => normOrderNo(o.orderId))), [db.orders]);
 
   const setVat = (mode) => update((db2) => ({ ...db2, settings: { ...db2.settings, fulfilmentVat: mode } }));
@@ -53,6 +53,23 @@ export default function FulfilmentInvoices({ db, update }) {
 
   const savedTotal = fulfilment.reduce((s, r) => s + (fulfilmentActual(r, vat) || 0), 0);
 
+  // How many imported orders now have an actual cost vs still estimated.
+  const savedKeys = useMemo(() => new Set(fulfilment.map((r) => r.id)), [fulfilment]);
+  const invoicedOrders = useMemo(() => (db.orders || []).filter((o) => savedKeys.has(normOrderNo(o.orderId))).length, [db.orders, savedKeys]);
+  const totalOrders = (db.orders || []).length;
+  const coverage = totalOrders ? Math.round((invoicedOrders / totalOrders) * 100) : 0;
+  const avgs = useMemo(() => invoiceAverages(fulfilment), [fulfilment]);
+
+  const applyEstimates = () => {
+    update((db2) => {
+      const rules = (db2.settings.costRules || []).filter((r) => r.id !== "kf-est-postage-uk" && r.id !== "kf-est-postage-intl");
+      rules.push({ id: "kf-est-postage-uk", label: "Royal Mail postage (UK, est.)", pct: 0, base: "itemSubtotal", fixed: avgs.ukPostage, platform: "all", region: "uk", enabled: true });
+      rules.push({ id: "kf-est-postage-intl", label: "Royal Mail postage (intl, est.)", pct: 0, base: "itemSubtotal", fixed: avgs.intlPostage, platform: "all", region: "intl", enabled: true });
+      return { ...db2, settings: { ...db2.settings, costRules: rules, defaults: { ...db2.settings.defaults, postagePerOrderShopify: 0, postagePerOrderEtsy: 0 } } };
+    });
+    setNote(`Postage estimate set from your invoices: ${money(avgs.ukPostage, currency)} UK, ${money(avgs.intlPostage, currency)} international. Un-invoiced orders now use these; flat postage default zeroed to avoid double counting.`);
+  };
+
   return (
     <div className="card mt">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
@@ -78,10 +95,22 @@ export default function FulfilmentInvoices({ db, update }) {
       {note && <div className="notice good mt small">✅ {note}</div>}
 
       {fulfilment.length > 0 && !preview && (
-        <div className="muted small mt">
-          <b>{fulfilment.length}</b> order{fulfilment.length === 1 ? "" : "s"} costed from invoices · total {money(savedTotal, currency)} ({vat === "excl" ? "ex" : "inc"} VAT).
-          {" "}<button className="btn small danger" style={{ marginLeft: 8 }} onClick={clearAll}>Clear all</button>
-        </div>
+        <>
+          <div className="muted small mt">
+            <b>{invoicedOrders}</b> of your <b>{totalOrders}</b> imported orders now use a real invoice cost ({coverage}%). The other {totalOrders - invoicedOrders} use the estimate rules until an invoice covers them. {fulfilment.length} invoice line{fulfilment.length === 1 ? "" : "s"} stored · {money(savedTotal, currency)} ({vat === "excl" ? "ex" : "inc"} VAT).
+            {" "}<button className="btn small danger" style={{ marginLeft: 8 }} onClick={clearAll}>Clear all</button>
+          </div>
+          {(avgs.ukN > 0 || avgs.intlN > 0) && (
+            <div className="notice mt small">
+              <b>Calibrate the estimate from these invoices.</b> Real Royal Mail postage averages{" "}
+              {avgs.ukN > 0 && <>{money(avgs.ukPostage, currency)} UK</>}
+              {avgs.ukN > 0 && avgs.intlN > 0 && " · "}
+              {avgs.intlN > 0 && <>{money(avgs.intlPostage, currency)} international</>}.
+              {" "}Apply these so orders <i>without</i> an invoice are estimated realistically instead of the flat default.
+              {" "}<button className="btn small" style={{ marginLeft: 6 }} onClick={applyEstimates}>Use as postage estimate</button>
+            </div>
+          )}
+        </>
       )}
 
       {preview && (
