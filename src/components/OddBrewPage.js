@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { uid, money, monthLabel } from "../lib/format";
 import { GroupedBars, Legend } from "./charts";
-import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex } from "../lib/oddbrew";
+import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex, parseMetaSpendCsv } from "../lib/oddbrew";
 import OddBrewInvoices from "./OddBrewInvoices";
 
 // The OMGO cost sheet, ready to seed (USD): [label, match, product, UK, US, EU].
@@ -43,6 +43,11 @@ export default function OddBrewPage({ user }) {
   const [ready, setReady] = useState(true);
   const [orders, setOrders] = useState(null);
   const [invoices, setInvoices] = useState([]);
+  const [adspend, setAdspend] = useState([]);
+  const [adReady, setAdReady] = useState(true);
+  const [manualDate, setManualDate] = useState("");
+  const [manualAmt, setManualAmt] = useState("");
+  const adFileRef = useRef(null);
   const [cfg, setCfg] = useState(mergeConfig(null));
   const [range, setRange] = useState("all");
   const [tab, setTab] = useState("overview");
@@ -80,8 +85,14 @@ export default function OddBrewPage({ user }) {
     const { data, error } = await supabase.from("oddbrew_invoices").select("id,data");
     if (!error) setInvoices((data || []).map((r) => ({ id: r.id, ...r.data })));
   };
+  const fetchAdspend = async () => {
+    const { data, error } = await supabase.from("oddbrew_adspend").select("id,data");
+    if (error) { setAdReady(false); return; }
+    setAdReady(true);
+    setAdspend((data || []).map((r) => r.data));
+  };
 
-  useEffect(() => { fetchOrders(); fetchConfig(); fetchInvoices(); }, []);
+  useEffect(() => { fetchOrders(); fetchConfig(); fetchInvoices(); fetchAdspend(); }, []);
   // Refresh invoices when returning to the overview (they drive actual costs).
   useEffect(() => { if (tab === "overview") fetchInvoices(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
   // Re-check connection when returning from the Shopify OAuth tab.
@@ -91,20 +102,27 @@ export default function OddBrewPage({ user }) {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  const inRange = (o) => {
+  const dateInRange = (dateStr) => {
     if (range === "all") return true;
-    if (!o.date) return false;
-    const d = new Date(o.date);
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
     const now = new Date();
     if (range === "ytd") return d.getFullYear() === now.getFullYear();
     const days = range === "90d" ? 90 : 365;
     return now - d <= days * 86400000;
   };
+  const inRange = (o) => dateInRange(o.date);
 
   const costIndex = buildInvoiceCostIndex(invoices, orders || [], cfg);
   const shown = (orders || []).filter(inRange);
   const totals = oddbrewTotals(shown, cfg, costIndex);
   const monthly = oddbrewMonthly(shown, cfg, costIndex);
+
+  const adSpendRange = (adspend || []).filter((s) => dateInRange(s.date)).reduce((sum, s) => sum + (s.amount || 0), 0);
+  const netAfterAds = totals.net - adSpendRange;
+  const monthSpend = {};
+  for (const s of adspend || []) { const mk = (s.date || "").slice(0, 7); if (mk) monthSpend[mk] = (monthSpend[mk] || 0) + (s.amount || 0); }
+  const monthlyNet = monthly.map((m) => ({ ...m, profit: m.profit - (monthSpend[m.month] || 0) }));
 
   const saveCfg = async (next) => {
     setErr(null);
@@ -151,6 +169,41 @@ export default function OddBrewPage({ user }) {
       if (fileRef.current) fileRef.current.value = "";
     }
   };
+
+  const importAdSpend = async (files) => {
+    setErr(null); setMsg(null); setBusy(true);
+    try {
+      let n = 0;
+      let note = null;
+      for (const f of Array.from(files || [])) {
+        const { currency, days } = parseMetaSpendCsv(await f.text());
+        if (currency && cur && currency !== cur) note = `Note: CSV is in ${currency}, store is ${cur} — amounts imported as-is.`;
+        for (let i = 0; i < days.length; i += 200) {
+          const chunk = days.slice(i, i + 200).map((d) => ({ id: d.date, data: { date: d.date, amount: d.amount, currency, source: "meta-csv" }, updated_at: new Date().toISOString() }));
+          const { error } = await supabase.from("oddbrew_adspend").upsert(chunk);
+          if (error) throw new Error(error.message);
+        }
+        n += days.length;
+      }
+      setMsg(note ? note + ` Imported ${n} day(s).` : `Imported ${n} day(s) of ad spend.`);
+      await fetchAdspend();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+      if (adFileRef.current) adFileRef.current.value = "";
+    }
+  };
+  const addManualSpend = async () => {
+    setErr(null);
+    if (!manualDate || manualAmt === "") return setErr("Pick a date and an amount.");
+    const rec = { date: manualDate, amount: parseFloat(manualAmt) || 0, currency: cur, source: "manual" };
+    const { error } = await supabase.from("oddbrew_adspend").upsert({ id: manualDate, data: rec, updated_at: new Date().toISOString() });
+    if (error) return setErr(error.message);
+    setManualDate(""); setManualAmt(""); setMsg("Ad spend saved.");
+    fetchAdspend();
+  };
+  const removeSpendDay = async (date) => { await supabase.from("oddbrew_adspend").delete().eq("id", date); fetchAdspend(); };
 
   const runSync = async (full) => {
     setErr(null); setSyncResult(null); setShowHelp(false); setSyncing(true);
@@ -224,7 +277,8 @@ export default function OddBrewPage({ user }) {
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <Stat label="Revenue" value={money(totals.revenue, cur)} sub={`${totals.orders} orders`} />
         <Stat label="Gross profit" value={money(totals.grossProfit, cur)} sub={totals.margin != null ? totals.margin.toFixed(1) + "% margin" : "—"} />
-        <Stat label="Net profit" value={money(totals.net, cur)} sub={`after ${money(totals.fixed, cur)} fixed`} />
+        <Stat label="Ad spend" value={money(adSpendRange, cur)} sub="Meta" />
+        <Stat label="Net profit" value={money(netAfterAds, cur)} sub="after fixed + ads" />
         <Stat label="Avg order" value={money(totals.aov, cur)} sub={`${totals.units} units`} />
       </div>
 
@@ -245,7 +299,7 @@ export default function OddBrewPage({ user }) {
             <Legend items={[{ label: "Revenue", color: "var(--c-revenue)" }, { label: "Net profit", color: "var(--c-profit)" }]} />
             <GroupedBars
               currency={cur}
-              data={monthly.map((m) => ({ label: monthLabel(m.month), values: [m.revenue, m.profit] }))}
+              data={monthlyNet.map((m) => ({ label: monthLabel(m.month), values: [m.revenue, m.profit] }))}
               series={[{ label: "Revenue", color: "var(--c-revenue)" }, { label: "Net profit", color: "var(--c-profit)" }]}
             />
           </>
@@ -371,6 +425,45 @@ export default function OddBrewPage({ user }) {
           <div className="notice mt small">⚠️ {totals.unmatched} sold item(s) didn't match any size rule — their product cost counts as {money(0, cur)}. Add or fix a rule whose "variant contains" text appears in those items.</div>
         )}
         <button className="btn primary mt" onClick={() => saveCfg(cfg)}>Save product costs</button>
+      </div>
+
+      <div className="card mt">
+        <h3>Ad spend (Meta)</h3>
+        {!adReady ? (
+          <div className="notice mt small">Run <code>supabase/migrations/2026-07-oddbrew-adspend.sql</code> in Supabase, then refresh, to track ad spend.</div>
+        ) : (
+          <>
+            <div className="muted small mt">Export your daily spend from Meta Ads Manager and drop the CSV here — re-importing the same days just updates them. It comes straight off Net profit.</div>
+            <label className="field mt">
+              <span className="lab">Ads Manager spend CSV (daily breakdown)</span>
+              <input ref={adFileRef} type="file" accept=".csv,text/csv" multiple onChange={(e) => importAdSpend(e.target.files)} disabled={busy} />
+            </label>
+            <div className="form-row">
+              <label className="field"><span className="lab">Or add a day manually</span><input type="date" value={manualDate} onChange={(e) => setManualDate(e.target.value)} /></label>
+              <label className="field"><span className="lab">Amount ({cur})</span><input type="number" step="0.01" value={manualAmt} onChange={(e) => setManualAmt(e.target.value)} /></label>
+              <div className="field" style={{ justifyContent: "flex-end" }}><button className="btn" onClick={addManualSpend}>Add day</button></div>
+            </div>
+            <div className="muted small mt"><b>{money(adSpendRange, cur)}</b> in the selected range · {(adspend || []).length} day(s) recorded total.</div>
+            {(adspend || []).length > 0 && (
+              <div className="table-wrap mt">
+                <table className="data">
+                  <thead><tr><th>Date</th><th className="num">Spend</th><th>Source</th><th></th></tr></thead>
+                  <tbody>
+                    {[...adspend].sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 8).map((s) => (
+                      <tr key={s.date}>
+                        <td>{s.date}</td>
+                        <td className="num">{money(s.amount, cur)}</td>
+                        <td className="small muted">{s.source === "manual" ? "Manual" : "Meta CSV"}</td>
+                        <td className="num"><button className="btn small danger" onClick={() => removeSpendDay(s.date)}>✕</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {adspend.length > 8 && <div className="muted small mt">Showing 8 most recent of {adspend.length} days.</div>}
+              </div>
+            )}
+          </>
+        )}
       </div>
       </>
       )}
