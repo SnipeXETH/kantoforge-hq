@@ -59,11 +59,15 @@ function mapOrder(o) {
   const buyer =
     (o.customer && `${o.customer.first_name || ""} ${o.customer.last_name || ""}`.trim()) ||
     (o.billing_address && o.billing_address.name) || "";
+  const country =
+    (o.shipping_address && o.shipping_address.country_code) ||
+    (o.billing_address && o.billing_address.country_code) || "";
   return {
     id: "oddbrew:" + o.name,
     platform: "shopify",
     channelVia: "shopify",
     orderId: o.name,
+    country,
     date: o.created_at ? new Date(o.created_at).toISOString() : null,
     currency: o.currency || "GBP",
     itemsTotal: parseFloat(o.subtotal_price) || 0,

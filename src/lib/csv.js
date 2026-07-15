@@ -120,6 +120,7 @@ function parseShopifyOrders(objects) {
         feesActual: null,
         buyer: row["Billing Name"] || row["Shipping Name"] || "",
         email: row["Email"] || "",
+        country: "",
         status: (row["Financial Status"] || "").toLowerCase(),
         tags: "",
         items: [],
@@ -128,6 +129,7 @@ function parseShopifyOrders(objects) {
     }
     if (row["Tags"]) order.tags = row["Tags"];
     if (row["Email"] && !order.email) order.email = row["Email"];
+    if (row["Shipping Country"] && !order.country) order.country = row["Shipping Country"];
     // Order-level money fields only appear on the first row of each order
     if (row["Total"] !== "" && row["Total"] != null) {
       order.itemsTotal = num(row["Subtotal"]);
