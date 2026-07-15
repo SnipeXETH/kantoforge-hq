@@ -6,6 +6,7 @@ import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvo
 import OddBrewInvoices from "./OddBrewInvoices";
 import OddBrewAnalysis from "./OddBrewAnalysis";
 import OddBrewAds from "./OddBrewAds";
+import OddBrewDaily from "./OddBrewDaily";
 import OddBrewLogo from "./OddBrewLogo";
 
 // The OMGO cost sheet's FINAL landed cost (USD): [label, match, UK, US, Europe].
@@ -284,6 +285,7 @@ export default function OddBrewPage({ user }) {
         </div>
         <div className="pills">
           <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button>
+          <button className={tab === "daily" ? "active" : ""} onClick={() => setTab("daily")}>Daily flow</button>
           <button className={tab === "analysis" ? "active" : ""} onClick={() => setTab("analysis")}>Stock &amp; analysis</button>
           <button className={tab === "ads" ? "active" : ""} onClick={() => setTab("ads")}>Ads &amp; ROAS</button>
           <button className={tab === "invoices" ? "active" : ""} onClick={() => setTab("invoices")}>Supplier invoices</button>
@@ -297,6 +299,8 @@ export default function OddBrewPage({ user }) {
         <OddBrewInvoices user={user} orders={orders || []} cfg={cfg} />
       ) : tab === "analysis" ? (
         <OddBrewAnalysis orders={orders || []} cfg={cfg} connected={connected} saveCfg={saveCfg} />
+      ) : tab === "daily" ? (
+        <OddBrewDaily orders={orders || []} adspend={adspend} invoices={invoices} cfg={cfg} connected={connected} saveCfg={saveCfg} onSync={() => runSync(false)} syncing={syncing} onReload={fetchAdspend} />
       ) : tab === "ads" ? (
         <OddBrewAds orders={orders || []} cfg={cfg} invoices={invoices} adspend={adspend} saveCfg={saveCfg} />
       ) : (
