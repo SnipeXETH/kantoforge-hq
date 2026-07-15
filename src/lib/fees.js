@@ -88,7 +88,7 @@ export function variableCosts(order, settings) {
   return { total, breakdown };
 }
 
-export function orderCogs(order, settings, productCosts) {
+export function orderCogs(order, settings, productCosts, fulfilmentActualCost) {
   const d = settings.defaults;
   let itemCosts = 0;
   let unmatched = 0;
@@ -107,14 +107,31 @@ export function orderCogs(order, settings, productCosts) {
     itemCosts += (d.fallbackItemCost || 0) * qty;
     unmatched += qty;
   }
-  const postage = order.platform === "etsy" ? d.postagePerOrderEtsy : d.postagePerOrderShopify;
   const packaging = d.packagingPerOrder || 0;
+
+  // If a supplier fulfilment invoice covers this order, its actual cost (Royal
+  // Mail postage + Total Cards fee + DDP) replaces the postage & variable-rule
+  // estimates. Item costs and packaging are yours, so they still apply.
+  if (fulfilmentActualCost != null) {
+    return {
+      total: itemCosts + packaging + fulfilmentActualCost,
+      itemCosts, postage: 0, packaging,
+      variable: 0, variableBreakdown: {},
+      fulfilmentActual: fulfilmentActualCost,
+      costBasis: "invoice",
+      unmatched,
+    };
+  }
+
+  const postage = order.platform === "etsy" ? d.postagePerOrderEtsy : d.postagePerOrderShopify;
   const variable = variableCosts(order, settings);
   return {
     total: itemCosts + postage + packaging + variable.total,
     itemCosts, postage, packaging,
     variable: variable.total,
     variableBreakdown: variable.breakdown,
+    fulfilmentActual: null,
+    costBasis: "estimate",
     unmatched,
   };
 }

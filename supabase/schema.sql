@@ -66,6 +66,13 @@ create table public.product_costs (
   updated_at timestamptz not null default now()
 );
 
+-- Actual per-order fulfilment costs parsed from Total Cards invoices.
+create table public.kf_fulfilment (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 create table public.fixed_costs (
   id text primary key,
   data jsonb not null,
@@ -182,6 +189,7 @@ insert into public.app_settings (id, data) values (1, '{}'::jsonb);
 alter table public.profiles enable row level security;
 alter table public.orders enable row level security;
 alter table public.product_costs enable row level security;
+alter table public.kf_fulfilment enable row level security;
 alter table public.fixed_costs enable row level security;
 alter table public.tasks enable row level security;
 alter table public.app_settings enable row level security;
@@ -208,6 +216,8 @@ create policy "admins update any profile" on public.profiles
 create policy "team full access" on public.orders
   for all to authenticated using (true) with check (true);
 create policy "team full access" on public.product_costs
+  for all to authenticated using (true) with check (true);
+create policy "team full access" on public.kf_fulfilment
   for all to authenticated using (true) with check (true);
 create policy "team full access" on public.fixed_costs
   for all to authenticated using (true) with check (true);
