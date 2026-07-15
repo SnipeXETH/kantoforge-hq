@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { money } from "../lib/format";
 import { activeOrders } from "../lib/oddbrew";
-import { salesByVariant, mergeInventory, analysisTotals } from "../lib/oddbrewAnalysis";
+import { salesByVariant, mergeInventory, analysisTotals, isAnalysed } from "../lib/oddbrewAnalysis";
 
 const RANGES = [["all", "All time"], ["12m", "12 months"], ["90d", "90 days"]];
 
@@ -48,12 +48,23 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
     return Date.now() - new Date(o.date).getTime() <= days * 86400000;
   };
 
+  // Default to the two lines still on sale; an explicit empty array means the
+  // user has deliberately chosen to show everything.
+  const include = cfg.analysisInclude !== undefined ? cfg.analysisInclude : ["Signature", "Studio"];
   const active = activeOrders(orders || [], cfg).filter(inRange);
   const sales = salesByVariant(active, cfg);
-  const rows = mergeInventory(sales, inv, { leadDays, targetCover });
+  const allRows = mergeInventory(sales, inv, { leadDays, targetCover });
+  const rows = allRows.filter((r) => isAnalysed(r.name, include));
+  const hiddenCount = allRows.length - rows.length;
   const totals = analysisTotals(rows);
 
   const setStock = (patch) => saveCfg({ ...cfg, stock: { ...stock, ...patch } });
+  const setInclude = (list) => saveCfg({ ...cfg, analysisInclude: list });
+
+  // Edited locally, committed on blur so we don't write to the DB per keystroke.
+  const [includeText, setIncludeText] = useState(include.join(", "));
+  useEffect(() => { setIncludeText(include.join(", ")); }, [cfg.analysisInclude]); // eslint-disable-line react-hooks/exhaustive-deps
+  const commitInclude = () => setInclude(includeText.split(",").map((s) => s.trim()).filter(Boolean));
 
   // Persist one variant's manual counts. Merge onto any Shopify-synced fields so
   // a later stock sync (which keeps manual fields) and this stay consistent.
@@ -131,6 +142,18 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
         {syncResult && <div className="notice good mt small">{syncResult}</div>}
 
         <div className="form-row mt">
+          <label className="field" style={{ flex: 1, minWidth: 240 }}>
+            <span className="lab">Only analyse these products</span>
+            <input type="text" value={includeText} onChange={(e) => setIncludeText(e.target.value)} onBlur={commitInclude} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitInclude(); } }} placeholder="e.g. Signature, Studio" />
+            <span className="hint">
+              Comma-separated keywords matched against the variant name — discontinued lines drop out. Leave blank to show everything.
+              {" "}<button type="button" onClick={() => setInclude(["Signature", "Studio"])} style={{ background: "none", border: "none", padding: 0, color: "var(--accent, #6ea8fe)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}>Signature + Studio only</button>.
+              {include.length ? ` Showing ${rows.length}${hiddenCount ? `, ${hiddenCount} hidden` : ""}.` : ""}
+            </span>
+          </label>
+        </div>
+
+        <div className="form-row">
           <label className="field" style={{ maxWidth: 200 }}>
             <span className="lab">Supplier lead time (days)</span>
             <input type="number" step="1" value={stock.leadDays == null ? "" : stock.leadDays} onChange={(e) => setStock({ leadDays: num(e.target.value) })} placeholder="e.g. 25" />
