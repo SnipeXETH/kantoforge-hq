@@ -89,7 +89,7 @@ export default function OddBrewPage({ user }) {
     const { data, error } = await supabase.from("oddbrew_adspend").select("id,data");
     if (error) { setAdReady(false); return; }
     setAdReady(true);
-    setAdspend((data || []).map((r) => r.data));
+    setAdspend((data || []).map((r) => ({ id: r.id, ...r.data })));
   };
 
   useEffect(() => { fetchOrders(); fetchConfig(); fetchInvoices(); fetchAdspend(); }, []);
@@ -461,11 +461,11 @@ export default function OddBrewPage({ user }) {
                   <thead><tr><th>Date</th><th className="num">Spend</th><th>Source</th><th></th></tr></thead>
                   <tbody>
                     {[...adspend].sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 8).map((s) => (
-                      <tr key={s.date}>
+                      <tr key={s.id}>
                         <td>{s.month || s.date}</td>
                         <td className="num">{money(s.amount, cur)}</td>
                         <td className="small muted">{s.source === "manual" ? "Manual" : "Meta CSV"}</td>
-                        <td className="num"><button className="btn small danger" onClick={() => removeSpendDay(s.date)}>✕</button></td>
+                        <td className="num"><button className="btn small danger" onClick={() => removeSpendDay(s.id)}>✕</button></td>
                       </tr>
                     ))}
                   </tbody>
