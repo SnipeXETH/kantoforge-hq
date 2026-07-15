@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { uid, money } from "../lib/format";
-import { activeOrders, buildInvoiceCostIndex, oddbrewTotals } from "../lib/oddbrew";
+import { activeOrders, buildInvoiceCostIndex, oddbrewTotals, parseMetaCampaignsCsv } from "../lib/oddbrew";
 
 const RANGES = [["all", "All time"], ["12m", "12 months"], ["90d", "90 days"]];
 const fmtRoas = (x) => (x == null || !isFinite(x) ? "—" : x.toFixed(2) + "×");
@@ -19,9 +19,12 @@ function Stat({ label, value, sub, tone, accent }) {
 // Break-even ROAS is 1 / gross-margin: a sale's contribution (revenue − fees −
 // COGS) has to cover the ad spend that won it. To also leave a target margin t
 // on that revenue, the ad needs ROAS ≥ 1 / (margin − t).
-export default function OddBrewAds({ orders, cfg, invoices, saveCfg }) {
+export default function OddBrewAds({ orders, cfg, invoices, adspend, saveCfg }) {
   const cur = cfg.currency || "GBP";
   const [range, setRange] = useState("all");
+  const [err, setErr] = useState(null);
+  const [note, setNote] = useState(null);
+  const fileRef = useRef(null);
 
   const inRange = (o) => {
     if (range === "all") return true;
@@ -63,6 +66,34 @@ export default function OddBrewAds({ orders, cfg, invoices, saveCfg }) {
   const sum = campaigns.reduce((a, c) => { const e = evalC(c); a.spend += e.spend; a.revenue += e.revenue; a.profit += e.profit || 0; return a; }, { spend: 0, revenue: 0, profit: 0 });
   const blendedRoas = sum.spend > 0 ? sum.revenue / sum.spend : null;
 
+  // Blended store ROAS (MER): every tracked ad pound vs all store revenue in the
+  // window — a top-line sanity check, not per-campaign attribution.
+  const adSpendRange = (adspend || []).filter((s) => inRange({ date: s.date })).reduce((a, s) => a + (s.amount || 0), 0);
+  const storeRoas = adSpendRange > 0 ? totals.revenue / adSpendRange : null;
+
+  const importMeta = async (files) => {
+    setErr(null); setNote(null);
+    const file = files && files[0];
+    if (!file) return;
+    try {
+      const parsed = parseMetaCampaignsCsv(await file.text());
+      const byName = new Map(campaigns.map((c) => [c.name.trim().toLowerCase(), c]));
+      for (const pc of parsed.campaigns) {
+        const key = pc.name.trim().toLowerCase();
+        const ex = byName.get(key);
+        byName.set(key, ex ? { ...ex, spend: pc.spend, revenue: pc.revenue } : { id: uid(), name: pc.name, spend: pc.spend, revenue: pc.revenue });
+      }
+      saveAds({ campaigns: Array.from(byName.values()) });
+      let msg = `Imported ${parsed.campaigns.length} campaign${parsed.campaigns.length === 1 ? "" : "s"} from Meta.`;
+      if (parsed.currency && parsed.currency !== cur) msg += ` CSV is in ${parsed.currency}, store is ${cur} — amounts imported as-is.`;
+      setNote(msg);
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
   const goalRows = [0, 10, 20, 30].map((g) => ({ g, roas: m - g / 100 > 0 ? 1 / (m - g / 100) : null }));
 
   return (
@@ -80,7 +111,13 @@ export default function OddBrewAds({ orders, cfg, invoices, saveCfg }) {
           <Stat label="Gross margin" value={(m * 100).toFixed(1) + "%"} sub={marginOverride != null && marginOverride !== "" ? "manual override" : "revenue − fees − COGS"} accent="var(--c-profit)" />
           <Stat label="Break-even ROAS" value={fmtRoas(breakEven)} sub="ads below this lose money" accent="#e8934a" tone="#e8934a" />
           <Stat label={`ROAS for ${targetMargin}% margin`} value={fmtRoas(targetRoas)} sub={targetRoas ? "aim above this" : "target above your margin"} accent="var(--c-revenue)" />
+          {storeRoas != null && (
+            <Stat label="Blended ROAS (MER)" value={fmtRoas(storeRoas)} sub={`${money(totals.revenue, cur)} ÷ ${money(adSpendRange, cur)} spend`} accent={breakEven != null && storeRoas >= breakEven ? "var(--good)" : "var(--bad)"} tone={breakEven != null ? (storeRoas >= breakEven ? "var(--good)" : "var(--bad)") : undefined} />
+          )}
         </div>
+      )}
+      {storeRoas != null && (
+        <div className="muted small mt">Blended ROAS = all store revenue ÷ all tracked ad spend for this window (a marketing-efficiency sanity check — it counts organic sales too, so it reads higher than a single campaign's ROAS).</div>
       )}
 
       {m != null && totals.cogs <= 0 && (
@@ -123,10 +160,18 @@ export default function OddBrewAds({ orders, cfg, invoices, saveCfg }) {
         <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
           <div>
             <h3 style={{ marginBottom: 2 }}>Campaign scorecard</h3>
-            <div className="muted small">Enter each campaign's spend and the revenue it drove (from Meta / your store). Green means it's beating your break-even ROAS.</div>
+            <div className="muted small">Import from Meta, or enter each campaign's spend and the revenue it drove. Green means it's beating your break-even ROAS.</div>
           </div>
-          <button className="btn small" onClick={addCampaign}>+ Add campaign</button>
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn small" onClick={() => fileRef.current && fileRef.current.click()}>⬆ Import from Meta</button>
+            <button className="btn small" onClick={addCampaign}>+ Add campaign</button>
+            <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => importMeta(e.target.files)} />
+          </div>
         </div>
+
+        {err && <div className="notice bad mt small">⚠️ {err}</div>}
+        {note && <div className="notice good mt small">✅ {note}</div>}
+        <div className="muted small mt">Meta Ads Manager → Campaigns → make sure <b>Amount spent</b> and <b>Purchases conversion value</b> (or <b>Purchase ROAS</b>) are shown → Reports/Export → CSV. Re-importing updates campaigns by name.</div>
 
         {campaigns.length > 0 ? (
           <div className="table-wrap mt">

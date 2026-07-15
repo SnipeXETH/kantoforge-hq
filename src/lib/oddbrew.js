@@ -75,6 +75,51 @@ export function parseMetaSpendCsv(text) {
   return { mode: "period", currency, total, from, to };
 }
 
+// Parse a Meta Ads Manager campaign export into per-campaign spend + revenue for
+// the ROAS scorecard. Needs an "Amount spent" column and either "Purchases
+// conversion value" (preferred) or "Purchase ROAS". Rows for the same campaign
+// (split by day/placement) are summed; blank-campaign summary rows are skipped.
+export function parseMetaCampaignsCsv(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error("That CSV looks empty.");
+  const headers = rows[0].map((h) => (h || "").trim());
+  const lower = headers.map((h) => h.toLowerCase());
+  const campCol = lower.findIndex((h) => h === "campaign name" || h === "campaign" || h === "ad set name" || h === "ad name");
+  if (campCol < 0) throw new Error("Couldn't find a 'Campaign name' column — export the campaign breakdown from Meta Ads Manager.");
+  const amtCol = lower.findIndex((h) => h.startsWith("amount spent") || h === "spend" || h === "amount");
+  if (amtCol < 0) throw new Error("Couldn't find an 'Amount spent' column in this export.");
+  const valCol = lower.findIndex((h) => h.includes("conversion value") || h === "purchases value");
+  const roasCol = lower.findIndex((h) => h.includes("purchase roas") || h === "roas" || h.includes("return on ad spend"));
+  if (valCol < 0 && roasCol < 0) {
+    throw new Error("Add a 'Purchases conversion value' (or 'Purchase ROAS') column in Meta's columns picker, then re-export — that's the revenue side of ROAS.");
+  }
+  const m = headers[amtCol].match(/\(([A-Za-z]{3})\)/);
+  const currency = m ? m[1].toUpperCase() : null;
+  const numOf = (v) => parseFloat(String(v == null ? "" : v).replace(/[£$€,\s]/g, ""));
+
+  const byName = new Map();
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const name = String(r[campCol] == null ? "" : r[campCol]).trim();
+    if (!name) continue; // summary/total row
+    const spend = numOf(r[amtCol]);
+    if (isNaN(spend)) continue;
+    let revenue = valCol >= 0 ? numOf(r[valCol]) : NaN;
+    if ((isNaN(revenue) || revenue === 0) && roasCol >= 0) {
+      const roas = numOf(r[roasCol]);
+      if (!isNaN(roas)) revenue = spend * roas;
+    }
+    if (isNaN(revenue)) revenue = 0;
+    const cur = byName.get(name) || { name, spend: 0, revenue: 0 };
+    cur.spend += spend;
+    cur.revenue += revenue;
+    byName.set(name, cur);
+  }
+  const campaigns = Array.from(byName.values()).map((c) => ({ name: c.name, spend: +c.spend.toFixed(2), revenue: +c.revenue.toFixed(2) }));
+  if (!campaigns.length) throw new Error("No campaign rows found in this export.");
+  return { currency, campaigns };
+}
+
 export const ODDBREW_DEFAULTS = {
   storeName: "OddBrew",
   currency: "GBP",
