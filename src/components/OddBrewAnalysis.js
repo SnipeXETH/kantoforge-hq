@@ -23,6 +23,18 @@ const coverLabel = (d) => {
   return Math.round(d) + "d";
 };
 
+// "Signature — Blue/White / 350ml" → "Signature". Splits on the first en/em
+// dash or spaced hyphen, so we group variants back to their product line.
+const productLine = (name) => String(name || "").split(/\s+[—–-]\s+/)[0].trim() || "(unnamed)";
+
+const chipStyle = (on) => ({
+  padding: "4px 11px", borderRadius: 999, cursor: "pointer", fontSize: 12.5, fontWeight: 600,
+  border: "1px solid " + (on ? "var(--accent, #6ea8fe)" : "var(--border)"),
+  background: on ? "rgba(110, 168, 254, 0.15)" : "transparent",
+  color: on ? "var(--text)" : "var(--text-2)",
+});
+const textBtn = { background: "none", border: "none", padding: 0, color: "var(--accent, #6ea8fe)", cursor: "pointer", font: "inherit", textDecoration: "underline" };
+
 export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
   const cur = cfg.currency || "GBP";
   const [range, setRange] = useState("all");
@@ -48,23 +60,43 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
     return Date.now() - new Date(o.date).getTime() <= days * 86400000;
   };
 
-  // Default to the two lines still on sale; an explicit empty array means the
-  // user has deliberately chosen to show everything.
-  const include = cfg.analysisInclude !== undefined ? cfg.analysisInclude : ["Signature", "Studio"];
   const active = activeOrders(orders || [], cfg).filter(inRange);
   const sales = salesByVariant(active, cfg);
   const allRows = mergeInventory(sales, inv, { leadDays, targetCover });
+
+  // Distinct product lines actually present in the data (Signature, Studio,
+  // Galactic, …). The variant name is "Product — Colour / Size", so the product
+  // line is the part before the first separator.
+  const lineMap = new Map();
+  for (const r of allRows) {
+    const p = productLine(r.name);
+    const cur = lineMap.get(p) || { name: p, units: 0, variants: 0 };
+    cur.units += r.units;
+    cur.variants += 1;
+    lineMap.set(p, cur);
+  }
+  const lines = Array.from(lineMap.values()).sort((a, b) => b.units - a.units);
+
+  // Which lines to analyse. Unconfigured → auto-pick the ones that look current
+  // (Signature/Studio); if none match, show everything so the table is never
+  // mysteriously empty. The chip picker below lets you set it explicitly.
+  const autoDefault = lines.filter((l) => /signature|studio/i.test(l.name)).map((l) => l.name);
+  const include = cfg.analysisInclude !== undefined
+    ? cfg.analysisInclude
+    : (autoDefault.length ? autoDefault : lines.map((l) => l.name));
+
   const rows = allRows.filter((r) => isAnalysed(r.name, include));
   const hiddenCount = allRows.length - rows.length;
   const totals = analysisTotals(rows);
 
   const setStock = (patch) => saveCfg({ ...cfg, stock: { ...stock, ...patch } });
   const setInclude = (list) => saveCfg({ ...cfg, analysisInclude: list });
-
-  // Edited locally, committed on blur so we don't write to the DB per keystroke.
-  const [includeText, setIncludeText] = useState(include.join(", "));
-  useEffect(() => { setIncludeText(include.join(", ")); }, [cfg.analysisInclude]); // eslint-disable-line react-hooks/exhaustive-deps
-  const commitInclude = () => setInclude(includeText.split(",").map((s) => s.trim()).filter(Boolean));
+  const lineOn = (name) => isAnalysed(name, include);
+  const toggleLine = (name) => {
+    const set = new Set(lines.filter((l) => lineOn(l.name)).map((l) => l.name));
+    if (set.has(name)) set.delete(name); else set.add(name);
+    setInclude([...set]);
+  };
 
   // Persist one variant's manual counts. Merge onto any Shopify-synced fields so
   // a later stock sync (which keeps manual fields) and this stay consistent.
@@ -141,17 +173,28 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
         </div>
         {syncResult && <div className="notice good mt small">{syncResult}</div>}
 
-        <div className="form-row mt">
-          <label className="field" style={{ flex: 1, minWidth: 240 }}>
-            <span className="lab">Only analyse these products</span>
-            <input type="text" value={includeText} onChange={(e) => setIncludeText(e.target.value)} onBlur={commitInclude} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitInclude(); } }} placeholder="e.g. Signature, Studio" />
-            <span className="hint">
-              Comma-separated keywords matched against the variant name — discontinued lines drop out. Leave blank to show everything.
-              {" "}<button type="button" onClick={() => setInclude(["Signature", "Studio"])} style={{ background: "none", border: "none", padding: 0, color: "var(--accent, #6ea8fe)", cursor: "pointer", font: "inherit", textDecoration: "underline" }}>Signature + Studio only</button>.
-              {include.length ? ` Showing ${rows.length}${hiddenCount ? `, ${hiddenCount} hidden` : ""}.` : ""}
-            </span>
-          </label>
-        </div>
+        {lines.length > 0 && (
+          <div className="mt">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>
+              <span className="lab">Product lines to analyse</span>
+              <span className="muted small">
+                <button type="button" style={textBtn} onClick={() => setInclude(lines.map((l) => l.name))}>All</button>
+                {autoDefault.length ? <> · <button type="button" style={textBtn} onClick={() => setInclude(autoDefault)}>Signature + Studio</button></> : null}
+              </span>
+            </div>
+            <div className="row mt" style={{ flexWrap: "wrap", gap: 6 }}>
+              {lines.map((l) => {
+                const on = lineOn(l.name);
+                return (
+                  <button key={l.name} type="button" onClick={() => toggleLine(l.name)} style={chipStyle(on)}>
+                    {on ? "✓ " : ""}{l.name} <span style={{ opacity: 0.6, fontWeight: 500 }}>· {l.units}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="hint mt">Tick the lines you still sell — discontinued ones drop out of the table and the totals above.{hiddenCount ? ` ${hiddenCount} variant${hiddenCount === 1 ? "" : "s"} hidden.` : ""}</div>
+          </div>
+        )}
 
         <div className="form-row">
           <label className="field" style={{ maxWidth: 200 }}>
