@@ -33,6 +33,10 @@ export function parseMetaSpendCsv(text) {
   const endCol = lower.findIndex((h) => h.startsWith("reporting ends"));
   const amtCol = lower.findIndex((h) => h.startsWith("amount spent") || h === "spend" || h === "amount");
   if (amtCol < 0) throw new Error("Couldn't find an 'Amount spent' column in this export.");
+  // Meta's "Include summary totals" adds a subtotal row with a blank campaign
+  // name that repeats the total — skip those so spend isn't double-counted.
+  const campCol = lower.findIndex((h) => h === "campaign name" || h === "ad set name" || h === "ad name");
+  const isSummary = (r) => campCol >= 0 && !String(r[campCol] == null ? "" : r[campCol]).trim();
   const m = headers[amtCol].match(/\(([A-Za-z]{3})\)/);
   const currency = m ? m[1].toUpperCase() : null;
   const amtOf = (r) => parseFloat(String(r[amtCol] == null ? "" : r[amtCol]).replace(/[£$€,\s]/g, ""));
@@ -41,6 +45,7 @@ export function parseMetaSpendCsv(text) {
     const byDay = new Map();
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i] || [];
+      if (isSummary(r)) continue;
       const day = normalizeDay(r[dayCol]);
       const amt = amtOf(r);
       if (!day || isNaN(amt)) continue;
@@ -57,6 +62,7 @@ export function parseMetaSpendCsv(text) {
   let total = 0, from = null, to = null;
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i] || [];
+    if (isSummary(r)) continue;
     const a = amtOf(r);
     if (!isNaN(a)) total += a;
     const s = startCol >= 0 ? normalizeDay(r[startCol]) : null;
