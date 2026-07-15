@@ -5,6 +5,7 @@ import { GroupedBars, Legend } from "./charts";
 import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex, parseMetaSpendCsv, unmatchedBreakdown, activeOrders, ruleCost } from "../lib/oddbrew";
 import OddBrewInvoices from "./OddBrewInvoices";
 import OddBrewAnalysis from "./OddBrewAnalysis";
+import OddBrewLogo from "./OddBrewLogo";
 
 // The OMGO cost sheet's FINAL landed cost (USD): [label, match, UK, US, Europe].
 const SHEET_SIZES = [
@@ -276,8 +277,9 @@ export default function OddBrewPage({ user }) {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>{cfg.storeName || "OddBrew"}</h1>
-          <div className="sub">A separate Shopify store — its own orders, costs, revenue &amp; profit.</div>
+          <h1 style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{cfg.storeName || "OddBrew"}</h1>
+          <OddBrewLogo height={44} title={cfg.storeName || "Odd Brew Co"} />
+          <div className="sub" style={{ marginTop: 6 }}>A separate Shopify store — its own orders, costs, revenue &amp; profit.</div>
         </div>
         <div className="pills">
           <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button>
