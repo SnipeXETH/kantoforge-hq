@@ -77,3 +77,25 @@ export function buildFulfilmentIndex(records, vatMode) {
   }
   return map;
 }
+
+const isUkDest = (c) => !c || /not assigned/i.test(c) || /^(uk|gb|gbr|united kingdom)$/i.test(String(c).trim());
+
+// Average the real costs across uploaded invoices, split UK vs international, so
+// they can seed the estimate for orders that don't have an invoice yet.
+export function invoiceAverages(records) {
+  let ukSum = 0, ukN = 0, intlSum = 0, intlN = 0, intlDdp = 0, feeSum = 0, n = 0;
+  for (const r of records || []) {
+    n++;
+    feeSum += r.fulfilmentFee || 0;
+    if (isUkDest(r.country)) { ukSum += r.rmSubtotal || 0; ukN++; }
+    else { intlSum += r.rmSubtotal || 0; intlN++; intlDdp += r.ddpTotal || 0; }
+  }
+  const avg = (s, c) => (c ? +(s / c).toFixed(2) : 0);
+  return {
+    count: n,
+    ukPostage: avg(ukSum, ukN), ukN,
+    intlPostage: avg(intlSum, intlN), intlN,
+    intlDdp: avg(intlDdp, intlN),
+    avgFee: avg(feeSum, n),
+  };
+}
