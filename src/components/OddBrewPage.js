@@ -298,7 +298,7 @@ export default function OddBrewPage({ user }) {
       ) : tab === "analysis" ? (
         <OddBrewAnalysis orders={orders || []} cfg={cfg} connected={connected} saveCfg={saveCfg} />
       ) : tab === "ads" ? (
-        <OddBrewAds orders={orders || []} cfg={cfg} invoices={invoices} saveCfg={saveCfg} />
+        <OddBrewAds orders={orders || []} cfg={cfg} invoices={invoices} adspend={adspend} saveCfg={saveCfg} />
       ) : (
       <>
       <div className="pills mb">
