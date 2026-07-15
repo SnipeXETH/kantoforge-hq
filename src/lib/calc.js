@@ -103,7 +103,7 @@ export function productBreakdown(enriched, settings, productCosts) {
   for (const o of enriched) {
     if (!o.items.length) continue;
     const itemValue = o.items.reduce((s, i) => s + i.price * i.qty, 0) || 1;
-    const overhead = o.fees.total + o.cogs.postage + o.cogs.packaging + o.discount;
+    const overhead = o.fees.total + o.cogs.postage + o.cogs.packaging + (o.cogs.variable || 0) + o.discount;
     for (const item of o.items) {
       const key = item.name;
       let p = byProduct.get(key);
