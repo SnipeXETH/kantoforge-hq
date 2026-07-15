@@ -5,6 +5,9 @@
     },
     "api/sync-oddbrew.js": {
       "maxDuration": 60
+    },
+    "api/oddbrew-inventory.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
@@ -15,6 +18,10 @@
     {
       "path": "/api/sync-oddbrew",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/oddbrew-inventory",
+      "schedule": "45 3 * * *"
     }
   ],
   "rewrites": [
