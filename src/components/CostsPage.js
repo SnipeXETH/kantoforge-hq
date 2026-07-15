@@ -94,16 +94,7 @@ export default function CostsPage({ db, update }) {
               <span className="hint">Used when no cost rule matches an item.</span>
             </label>
           </div>
-          <div className="form-row">
-            <label className="field">
-              <span className="lab">Postage paid per Etsy order</span>
-              <input type="number" step="0.01" defaultValue={d.postagePerOrderEtsy} onBlur={(e) => setDefault("postagePerOrderEtsy", e.target.value)} />
-            </label>
-            <label className="field">
-              <span className="lab">Postage paid per Shopify order</span>
-              <input type="number" step="0.01" defaultValue={d.postagePerOrderShopify} onBlur={(e) => setDefault("postagePerOrderShopify", e.target.value)} />
-            </label>
-          </div>
+          <div className="muted small mt">Postage is handled automatically — actual cost from an uploaded fulfilment invoice, or the estimate rules below for orders not yet invoiced.</div>
         </div>
 
         <div className="card" style={{ margin: 0 }}>
