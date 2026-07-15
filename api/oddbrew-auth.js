@@ -52,9 +52,16 @@ module.exports = async (req, res) => {
     const clientSecret = process.env.ODDBREW_SHOPIFY_CLIENT_SECRET;
     const shop = shopDomain();
     if (!clientId || !clientSecret || !shop) {
+      const missing = [];
+      if (!process.env.ODDBREW_SHOPIFY_STORE_DOMAIN) missing.push("ODDBREW_SHOPIFY_STORE_DOMAIN");
+      if (!clientId) missing.push("ODDBREW_SHOPIFY_CLIENT_ID");
+      if (!clientSecret) missing.push("ODDBREW_SHOPIFY_CLIENT_SECRET");
       res.setHeader("Content-Type", "text/html");
       return res.status(500).send(page("OddBrew not configured",
-        "<h2>OddBrew OAuth isn't configured</h2><p>Set <code>ODDBREW_SHOPIFY_STORE_DOMAIN</code>, <code>ODDBREW_SHOPIFY_CLIENT_ID</code> and <code>ODDBREW_SHOPIFY_CLIENT_SECRET</code> in Vercel, then try again.</p>"));
+        "<h2>OddBrew OAuth isn't configured</h2>" +
+        "<p>These variable(s) aren't reaching the server:</p>" +
+        "<p style='font-family:monospace;color:#ff8a8a'>" + missing.join("<br>") + "</p>" +
+        "<p style='color:#9aa'>Set them in Vercel for the <b>Production</b> environment, then trigger a <b>new deployment</b> (env-var changes only apply to deployments made after they're added). Check for stray spaces and exact names.</p>"));
     }
 
     const url = new URL(req.url, `https://${req.headers.host}`);
