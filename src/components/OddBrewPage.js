@@ -5,6 +5,7 @@ import { GroupedBars, Legend } from "./charts";
 import { mergeConfig, importOddbrewCsv, oddbrewTotals, oddbrewMonthly, buildInvoiceCostIndex, parseMetaSpendCsv, unmatchedBreakdown, activeOrders, ruleCost } from "../lib/oddbrew";
 import OddBrewInvoices from "./OddBrewInvoices";
 import OddBrewAnalysis from "./OddBrewAnalysis";
+import OddBrewAds from "./OddBrewAds";
 import OddBrewLogo from "./OddBrewLogo";
 
 // The OMGO cost sheet's FINAL landed cost (USD): [label, match, UK, US, Europe].
@@ -284,6 +285,7 @@ export default function OddBrewPage({ user }) {
         <div className="pills">
           <button className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button>
           <button className={tab === "analysis" ? "active" : ""} onClick={() => setTab("analysis")}>Stock &amp; analysis</button>
+          <button className={tab === "ads" ? "active" : ""} onClick={() => setTab("ads")}>Ads &amp; ROAS</button>
           <button className={tab === "invoices" ? "active" : ""} onClick={() => setTab("invoices")}>Supplier invoices</button>
         </div>
       </div>
@@ -295,6 +297,8 @@ export default function OddBrewPage({ user }) {
         <OddBrewInvoices user={user} orders={orders || []} cfg={cfg} />
       ) : tab === "analysis" ? (
         <OddBrewAnalysis orders={orders || []} cfg={cfg} connected={connected} saveCfg={saveCfg} />
+      ) : tab === "ads" ? (
+        <OddBrewAds orders={orders || []} cfg={cfg} invoices={invoices} saveCfg={saveCfg} />
       ) : (
       <>
       <div className="pills mb">
