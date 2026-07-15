@@ -191,6 +191,7 @@ function parseEtsyOrders(objects) {
       refunded: 0,
       feesActual: num(row["Card Processing Fees"]) || null,
       buyer: row["Full Name"] || row["Buyer"] || "",
+      country: row["Ship Country"] || row["Shipping Country"] || "",
       status: (row["Status"] || "paid").toLowerCase(),
       items: [],
       numItems: num(row["Number of Items"]) || null,
