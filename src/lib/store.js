@@ -25,6 +25,10 @@ export const DEFAULT_SETTINGS = {
     postagePerOrderShopify: 3.5,
     fallbackItemCost: 0, // used when no product cost rule matches
   },
+  // Variable per-order costs expressed as a formula: pct % of a base amount +
+  // a fixed amount, optionally scoped by platform/region. e.g. fulfilment fees,
+  // DDP. Each: { id, label, pct, base, fixed, platform, region, enabled }
+  costRules: [],
   // months manually marked "no sales" on the import coverage grid,
   // keyed "YYYY-MM:platform"
   coverageMarks: {},
@@ -42,7 +46,9 @@ function mergeSettings(saved) {
   const out = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
   if (!saved) return out;
   for (const k of Object.keys(saved)) {
-    if (saved[k] && typeof saved[k] === "object" && out[k] && typeof out[k] === "object") {
+    if (Array.isArray(saved[k])) {
+      out[k] = saved[k]; // replace arrays wholesale (e.g. costRules)
+    } else if (saved[k] && typeof saved[k] === "object" && out[k] && typeof out[k] === "object") {
       out[k] = { ...out[k], ...saved[k] };
     } else {
       out[k] = saved[k];

@@ -43,6 +43,51 @@ export function matchProductCost(item, productCosts) {
   return null;
 }
 
+// --- Variable per-order costs (formula rules) ------------------------------
+// A rule is `pct % of <base> + fixed`, optionally scoped to a platform/region.
+// Lets you model % costs like fulfilment fees and DDP that vary per order.
+
+export function orderBaseAmount(order, base) {
+  const itemsAfterDiscount = (order.itemsTotal || 0) - (order.discount || 0); // ex shipping
+  switch (base) {
+    case "orderTotal": return order.total || 0;
+    case "revenue": return itemsAfterDiscount + (order.shipping || 0) - (order.refunded || 0);
+    case "shipping": return order.shipping || 0;
+    case "itemSubtotal":
+    default: return itemsAfterDiscount;
+  }
+}
+
+function isUkOrder(order) {
+  const c = (order.country || "").trim().toUpperCase();
+  return c === "" || c === "GB" || c === "UK" || c === "GBR" || c === "UNITED KINGDOM";
+}
+
+function variableRuleApplies(order, rule) {
+  if (rule.enabled === false) return false;
+  const plat = rule.platform || "all";
+  if (plat !== "all" && order.platform !== plat) return false;
+  const region = rule.region || "all";
+  if (region === "uk" && !isUkOrder(order)) return false;
+  if (region === "intl" && isUkOrder(order)) return false;
+  return true;
+}
+
+export function variableCosts(order, settings) {
+  const rules = (settings && settings.costRules) || [];
+  let total = 0;
+  const breakdown = {};
+  for (const rule of rules) {
+    if (!variableRuleApplies(order, rule)) continue;
+    const amt = Math.max(0, orderBaseAmount(order, rule.base)) * ((Number(rule.pct) || 0) / 100) + (Number(rule.fixed) || 0);
+    if (!amt) continue;
+    const key = rule.label || "Variable cost";
+    total += amt;
+    breakdown[key] = (breakdown[key] || 0) + amt;
+  }
+  return { total, breakdown };
+}
+
 export function orderCogs(order, settings, productCosts) {
   const d = settings.defaults;
   let itemCosts = 0;
@@ -64,5 +109,12 @@ export function orderCogs(order, settings, productCosts) {
   }
   const postage = order.platform === "etsy" ? d.postagePerOrderEtsy : d.postagePerOrderShopify;
   const packaging = d.packagingPerOrder || 0;
-  return { total: itemCosts + postage + packaging, itemCosts, postage, packaging, unmatched };
+  const variable = variableCosts(order, settings);
+  return {
+    total: itemCosts + postage + packaging + variable.total,
+    itemCosts, postage, packaging,
+    variable: variable.total,
+    variableBreakdown: variable.breakdown,
+    unmatched,
+  };
 }

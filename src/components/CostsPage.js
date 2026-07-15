@@ -39,6 +39,19 @@ export default function CostsPage({ db, update }) {
     update((db2) => ({ ...db2, settings: { ...db2.settings, defaults: { ...db2.settings.defaults, [key]: isNaN(v) ? 0 : v } } }));
   };
 
+  // --- variable cost rules (formula: % of a base + fixed, scoped) ---
+  const costRules = db.settings.costRules || [];
+  const setCostRules = (next) => update((db2) => ({ ...db2, settings: { ...db2.settings, costRules: next } }));
+  const addCostRule = () => setCostRules([...costRules, { id: uid(), label: "", pct: 0, base: "itemSubtotal", fixed: 0, platform: "all", region: "all", enabled: true }]);
+  const updateCostRule = (id, patch) => setCostRules(costRules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const removeCostRule = (id) => setCostRules(costRules.filter((r) => r.id !== id));
+  const numOf = (v) => (v === "" ? 0 : parseFloat(v) || 0);
+  const seedCostRules = () => setCostRules([
+    ...costRules,
+    { id: uid(), label: "Total Cards fulfilment", pct: 12, base: "itemSubtotal", fixed: 0, platform: "all", region: "all", enabled: true },
+    { id: uid(), label: "DDP", pct: 10, base: "itemSubtotal", fixed: 0.5, platform: "all", region: "intl", enabled: true },
+  ]);
+
   // Which imported products still have no matching cost rule?
   const unmatchedProducts = useMemo(() => {
     const seen = new Map();
@@ -167,6 +180,79 @@ export default function CostsPage({ db, update }) {
               {!db.productCosts.length && <tr><td colSpan={5} className="muted">No rules yet.</td></tr>}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="card mt">
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <h2 style={{ marginBottom: 2 }}>Variable cost rules</h2>
+            <div className="card-sub" style={{ margin: 0 }}>
+              For costs that are a <b>percentage of each order</b> — fulfilment fees, DDP, etc. Each rule is
+              <b> % of a base amount + a fixed amount</b>, and can be scoped to a platform or to UK / international orders.
+              These pull through every order automatically. (Etsy &amp; Shopify payment fees are handled in Settings — don't re-add them here.)
+            </div>
+          </div>
+          <div className="row" style={{ gap: 6 }}>
+            {!costRules.length && <button className="btn small" onClick={seedCostRules}>Load Total Cards + DDP</button>}
+            <button className="btn small primary" onClick={addCostRule}>+ Add rule</button>
+          </div>
+        </div>
+
+        {costRules.length > 0 && (
+          <div className="table-wrap mt">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Label</th>
+                  <th className="num">%</th>
+                  <th>of</th>
+                  <th className="num">+ fixed ({currency})</th>
+                  <th>Platform</th>
+                  <th>Applies to</th>
+                  <th className="num">On</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {costRules.map((r) => (
+                  <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
+                    <td><input type="text" defaultValue={r.label} onBlur={(e) => updateCostRule(r.id, { label: e.target.value })} placeholder="e.g. DDP" style={{ width: 150 }} /></td>
+                    <td className="num"><input type="number" step="0.1" defaultValue={r.pct} onBlur={(e) => updateCostRule(r.id, { pct: numOf(e.target.value) })} style={{ width: 62 }} /></td>
+                    <td>
+                      <select value={r.base} onChange={(e) => updateCostRule(r.id, { base: e.target.value })}>
+                        <option value="itemSubtotal">Item subtotal (after disc, ex shipping)</option>
+                        <option value="orderTotal">Order total</option>
+                        <option value="revenue">Revenue (incl shipping)</option>
+                        <option value="shipping">Shipping</option>
+                      </select>
+                    </td>
+                    <td className="num"><input type="number" step="0.01" defaultValue={r.fixed} onBlur={(e) => updateCostRule(r.id, { fixed: numOf(e.target.value) })} style={{ width: 68 }} /></td>
+                    <td>
+                      <select value={r.platform || "all"} onChange={(e) => updateCostRule(r.id, { platform: e.target.value })}>
+                        <option value="all">All</option>
+                        <option value="shopify">Shopify</option>
+                        <option value="etsy">Etsy</option>
+                      </select>
+                    </td>
+                    <td>
+                      <select value={r.region || "all"} onChange={(e) => updateCostRule(r.id, { region: e.target.value })}>
+                        <option value="all">All orders</option>
+                        <option value="uk">UK only</option>
+                        <option value="intl">International only</option>
+                      </select>
+                    </td>
+                    <td className="num"><input type="checkbox" checked={r.enabled !== false} onChange={(e) => updateCostRule(r.id, { enabled: e.target.checked })} /></td>
+                    <td className="num"><button className="btn small danger" onClick={() => removeCostRule(r.id)}>✕</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="muted small mt">
+          Example — <b>Total Cards fulfilment</b>: 12% of item subtotal. <b>DDP</b>: 10% of item subtotal + £0.50, International only.
+          “International” means any non-UK shipping country. Royal Mail postage stays as the flat per-order figure above until we wire in Cameron's invoice spreadsheet.
         </div>
       </div>
 
