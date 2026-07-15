@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { money } from "../lib/format";
-import { activeOrders } from "../lib/oddbrew";
+import { activeOrders, findCostRule, ruleCost } from "../lib/oddbrew";
 import { salesByVariant, mergeInventory, analysisTotals } from "../lib/oddbrewAnalysis";
 
 const RANGES = [["all", "All time"], ["12m", "12 months"], ["90d", "90 days"]];
@@ -26,6 +26,15 @@ const coverLabel = (d) => {
 // "Signature — Blue/White / 350ml" → "Signature". Splits on the first en/em
 // dash or spaced hyphen, so we group variants back to their product line.
 const productLine = (name) => String(name || "").split(/\s+[—–-]\s+/)[0].trim() || "(unnamed)";
+// The colour/size detail — everything after the product line.
+const variantDetail = (name) => {
+  const parts = String(name || "").split(/\s+[—–-]\s+/);
+  return parts.length > 1 ? parts.slice(1).join(" — ").trim() : "";
+};
+const csvEscape = (v) => {
+  const s = String(v == null ? "" : v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
 
 // The variants still on sale (from the store's product pages):
 //   Signature cup — 5 colours × {250ml, 350ml}
@@ -91,6 +100,7 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
   const [err, setErr] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [orderQty, setOrderQty] = useState({});
 
   const stock = cfg.stock || {};
   const leadDays = Number(stock.leadDays) || 0;
@@ -149,6 +159,42 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
     setHidden(keys);
     const kept = allRows.length - keys.length;
     setSyncResult(`Kept ${kept} current variant${kept === 1 ? "" : "s"}, hid ${keys.length}. Check the “Hidden” list below if anything looks off.`);
+  };
+
+  // Supplier stock order. Per-unit cost is the size rule's UK landed rate (the
+  // single figure we hold) — a rough budgeting estimate, not the order total.
+  const unitCost = (r) => {
+    const rule = findCostRule(r.name, cfg.costRules || []);
+    return rule ? ruleCost(rule, "UK") * (cfg.costFx || 1) : 0;
+  };
+  const setQty = (key, v) => setOrderQty((prev) => ({ ...prev, [key]: v === "" ? "" : Math.max(0, parseInt(v, 10) || 0) }));
+  const fillFromSuggestions = () => {
+    const next = {};
+    for (const r of rows) if (r.suggested > 0) next[r.key] = r.suggested;
+    setOrderQty(next);
+  };
+  const clearOrder = () => setOrderQty({});
+  const orderItems = rows
+    .map((r) => ({ r, qty: Number(orderQty[r.key]) || 0 }))
+    .filter((x) => x.qty > 0);
+  const orderUnits = orderItems.reduce((s, x) => s + x.qty, 0);
+  const orderCost = orderItems.reduce((s, x) => s + x.qty * unitCost(x.r), 0);
+  const downloadOrder = () => {
+    if (!orderItems.length) return;
+    const header = ["Product", "Variant", "SKU", "Order qty", "Est. unit cost (" + cur + ")", "Est. line cost (" + cur + ")"];
+    const lineFor = ({ r, qty }) => {
+      const unit = unitCost(r);
+      return [productLine(r.name), variantDetail(r.name), r.sku || "", qty, unit ? unit.toFixed(2) : "", unit ? (unit * qty).toFixed(2) : ""];
+    };
+    const body = orderItems.map((x) => lineFor(x).map(csvEscape).join(","));
+    const totalRow = ["", "", "TOTAL", orderUnits, "", orderCost ? orderCost.toFixed(2) : ""].map(csvEscape).join(",");
+    const csv = [header.map(csvEscape).join(","), ...body, totalRow].join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "oddbrew-stock-order-" + new Date().toISOString().slice(0, 10) + ".csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
   };
 
   // Persist one variant's manual counts. Merge onto any Shopify-synced fields so
@@ -339,6 +385,65 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
           {connected ? " “Sync stock from Shopify” fills the Shopify column; enter your own on-hand counts if you hold stock the store doesn't track." : ""}
         </div>
       </div>
+
+      {rows.length > 0 && (
+        <div className="card mt">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <h3 style={{ marginBottom: 2 }}>Supplier order</h3>
+              <div className="muted small">Set how many of each variant to order, then export a CSV to send your supplier. Pre-fill from the reorder suggestions or type your own.</div>
+            </div>
+            <div className="row" style={{ gap: 6 }}>
+              <button className="btn small" onClick={fillFromSuggestions}>Fill from suggestions</button>
+              <button className="btn small" onClick={clearOrder} disabled={!orderItems.length}>Clear</button>
+            </div>
+          </div>
+
+          <div className="table-wrap mt">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Variant</th>
+                  <th className="num">On hand</th>
+                  <th className="num">Units / mo</th>
+                  <th className="num">Suggested</th>
+                  <th className="num">Order qty</th>
+                  <th className="num">Est. cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const qty = Number(orderQty[r.key]) || 0;
+                  const unit = unitCost(r);
+                  return (
+                    <tr key={r.key}>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{r.name}</div>
+                        {r.sku ? <div className="muted small"><code>{r.sku}</code></div> : null}
+                      </td>
+                      <td className="num">{r.onHand || 0}</td>
+                      <td className="num">{r.perMonth || "—"}</td>
+                      <td className="num">{r.suggested > 0 ? "+" + r.suggested : "—"}</td>
+                      <td className="num"><input type="number" step="1" min="0" value={orderQty[r.key] == null ? "" : orderQty[r.key]} onChange={(e) => setQty(r.key, e.target.value)} placeholder="0" style={{ width: 68 }} /></td>
+                      <td className="num muted small">{qty > 0 && unit ? money(unit * qty, cur) : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="row mt" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+            <div className="muted small">
+              {orderUnits > 0
+                ? <>Ordering <b>{orderUnits}</b> unit{orderUnits === 1 ? "" : "s"} across <b>{orderItems.length}</b> variant{orderItems.length === 1 ? "" : "s"}{orderCost ? <> · est. <b>{money(orderCost, cur)}</b></> : null}.</>
+                : "Set an order quantity on at least one variant to export."}
+            </div>
+            <button className="btn primary" onClick={downloadOrder} disabled={!orderItems.length}>⬇ Download order CSV</button>
+          </div>
+          <div className="hint mt">Est. cost uses your size rules' UK landed rate as a rough guide — the supplier's own pricing is the source of truth.</div>
+        </div>
+      )}
     </>
   );
 }
