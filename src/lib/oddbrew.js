@@ -1,9 +1,46 @@
 // OddBrew: a separate Shopify store. Reuses KantoForge's CSV parser and
 // revenue formula, but with its own IDs, its own (simpler) cost model, and no
 // Etsy anywhere.
-import { importCsvText } from "./csv";
+import { importCsvText, parseCSV } from "./csv";
 import { orderRevenue } from "./calc";
 import { shopifyFees } from "./fees";
+
+function normalizeDay(v) {
+  const s = String(v || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (us) {
+    let [, mm, dd, yy] = us;
+    if (yy.length === 2) yy = "20" + yy;
+    return `${yy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
+  const d = new Date(s);
+  return isNaN(d) ? null : d.toISOString().slice(0, 10);
+}
+
+// Parse a Meta Ads Manager spend export (daily breakdown) into per-day totals.
+export function parseMetaSpendCsv(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error("That CSV looks empty.");
+  const headers = rows[0].map((h) => (h || "").trim());
+  const lower = headers.map((h) => h.toLowerCase());
+  const dateCol = lower.findIndex((h) => h === "day" || h === "date" || h.startsWith("reporting starts"));
+  const amtCol = lower.findIndex((h) => h.startsWith("amount spent") || h === "spend" || h === "amount spent" || h === "amount");
+  if (dateCol < 0 || amtCol < 0) {
+    throw new Error("Couldn't find a date column and an 'Amount spent' column. In Ads Manager, export the report with a day-by-day breakdown.");
+  }
+  const m = headers[amtCol].match(/\(([A-Za-z]{3})\)/);
+  const currency = m ? m[1].toUpperCase() : null;
+  const byDay = new Map();
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const day = normalizeDay(r[dateCol]);
+    const amt = parseFloat(String(r[amtCol] == null ? "" : r[amtCol]).replace(/[£$€,\s]/g, ""));
+    if (!day || isNaN(amt)) continue;
+    byDay.set(day, (byDay.get(day) || 0) + amt);
+  }
+  return { currency, days: Array.from(byDay.entries()).map(([date, amount]) => ({ date, amount: +amount.toFixed(2) })) };
+}
 
 export const ODDBREW_DEFAULTS = {
   storeName: "OddBrew",
