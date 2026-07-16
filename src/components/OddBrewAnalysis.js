@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { money } from "../lib/format";
-import { activeOrders, findCostRule, ruleCost } from "../lib/oddbrew";
+import { activeOrders, findCostRule, ruleCost, ODDBREW_RANGES, inOddbrewRange } from "../lib/oddbrew";
 import { salesByVariant, mergeInventory, analysisTotals } from "../lib/oddbrewAnalysis";
 
-const RANGES = [["all", "All time"], ["12m", "12 months"], ["90d", "90 days"]];
+const RANGES = ODDBREW_RANGES;
 
 function Stat({ label, value, sub, tone, accent }) {
   return (
@@ -112,12 +112,7 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
   };
   useEffect(() => { fetchInv(); }, []);
 
-  const inRange = (o) => {
-    if (range === "all") return true;
-    if (!o.date) return false;
-    const days = range === "90d" ? 90 : 365;
-    return Date.now() - new Date(o.date).getTime() <= days * 86400000;
-  };
+  const inRange = (o) => inOddbrewRange(o.date, range);
 
   const active = activeOrders(orders || [], cfg).filter(inRange);
   const sales = salesByVariant(active, cfg);
