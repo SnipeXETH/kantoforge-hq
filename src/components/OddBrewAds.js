@@ -1,8 +1,8 @@
 import React, { useRef, useState } from "react";
 import { uid, money } from "../lib/format";
-import { activeOrders, buildInvoiceCostIndex, oddbrewTotals, parseMetaCampaignsCsv } from "../lib/oddbrew";
+import { activeOrders, buildInvoiceCostIndex, oddbrewTotals, parseMetaCampaignsCsv, ODDBREW_RANGES, inOddbrewRange } from "../lib/oddbrew";
 
-const RANGES = [["all", "All time"], ["12m", "12 months"], ["90d", "90 days"]];
+const RANGES = ODDBREW_RANGES;
 const fmtRoas = (x) => (x == null || !isFinite(x) ? "—" : x.toFixed(2) + "×");
 
 function Stat({ label, value, sub, tone, accent }) {
@@ -26,12 +26,7 @@ export default function OddBrewAds({ orders, cfg, invoices, adspend, saveCfg }) 
   const [note, setNote] = useState(null);
   const fileRef = useRef(null);
 
-  const inRange = (o) => {
-    if (range === "all") return true;
-    if (!o.date) return false;
-    const days = range === "90d" ? 90 : 365;
-    return Date.now() - new Date(o.date).getTime() <= days * 86400000;
-  };
+  const inRange = (o) => inOddbrewRange(o.date, range);
 
   const active = activeOrders(orders || [], cfg).filter(inRange);
   const costIndex = buildInvoiceCostIndex(invoices || [], active, cfg);

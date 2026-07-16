@@ -120,6 +120,26 @@ export function parseMetaCampaignsCsv(text) {
   return { currency, campaigns };
 }
 
+// Shared Shopify-style date ranges for every OddBrew tab.
+export const ODDBREW_RANGES = [
+  ["today", "Today"], ["yesterday", "Yesterday"], ["7d", "7 days"],
+  ["30d", "30 days"], ["90d", "90 days"], ["12m", "12 months"], ["all", "All time"],
+];
+export function inOddbrewRange(dateStr, range) {
+  if (range === "all") return true;
+  if (!dateStr) return false;
+  const d = new Date(dateStr);
+  const now = new Date();
+  if (range === "today" || range === "yesterday") {
+    const day = new Date(now); day.setHours(0, 0, 0, 0);
+    if (range === "yesterday") day.setDate(day.getDate() - 1);
+    const next = new Date(day); next.setDate(day.getDate() + 1);
+    return d >= day && d < next;
+  }
+  const days = { "7d": 7, "30d": 30, "90d": 90, "12m": 365 }[range] || 365;
+  return now - d <= days * 86400000;
+}
+
 export const ODDBREW_DEFAULTS = {
   storeName: "OddBrew",
   currency: "GBP",
