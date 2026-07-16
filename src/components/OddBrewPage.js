@@ -7,7 +7,6 @@ import OddBrewInvoices from "./OddBrewInvoices";
 import OddBrewAnalysis from "./OddBrewAnalysis";
 import OddBrewAds from "./OddBrewAds";
 import OddBrewDaily from "./OddBrewDaily";
-import OddBrewLogo from "./OddBrewLogo";
 
 // The OMGO cost sheet's FINAL landed cost (USD): [label, match, UK, US, Europe].
 const SHEET_SIZES = [
@@ -272,7 +271,7 @@ export default function OddBrewPage({ user }) {
       <div className="page-head">
         <div>
           <h1 style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{cfg.storeName || "OddBrew"}</h1>
-          <OddBrewLogo height={44} title={cfg.storeName || "Odd Brew Co"} />
+          <img src="https://cdn.shopify.com/s/files/1/0969/1955/2384/files/Text_Logo_-_White.png?v=1784207152" alt={cfg.storeName || "Odd Brew Co"} style={{ height: 34, width: "auto", display: "block" }} />
           <div className="sub" style={{ marginTop: 6 }}>A separate Shopify store — its own orders, costs, revenue &amp; profit.</div>
         </div>
         <div className="pills">
