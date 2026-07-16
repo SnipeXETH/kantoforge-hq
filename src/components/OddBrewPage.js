@@ -31,7 +31,7 @@ alter table public.oddbrew_config enable row level security;
 create policy "team full access" on public.oddbrew_orders for all to authenticated using (true) with check (true);
 create policy "team full access" on public.oddbrew_config for all to authenticated using (true) with check (true);`;
 
-const RANGES = [["all", "All time"], ["ytd", "This year"], ["12m", "12 months"], ["90d", "90 days"]];
+const RANGES = [["today", "Today"], ["yesterday", "Yesterday"], ["7d", "7 days"], ["30d", "30 days"], ["90d", "90 days"], ["12m", "12 months"], ["all", "All time"]];
 
 function Stat({ label, value, sub, tone, accent }) {
   return (
@@ -112,8 +112,13 @@ export default function OddBrewPage({ user }) {
     if (!dateStr) return false;
     const d = new Date(dateStr);
     const now = new Date();
-    if (range === "ytd") return d.getFullYear() === now.getFullYear();
-    const days = range === "90d" ? 90 : 365;
+    if (range === "today" || range === "yesterday") {
+      const day = new Date(now); day.setHours(0, 0, 0, 0);
+      if (range === "yesterday") day.setDate(day.getDate() - 1);
+      const next = new Date(day); next.setDate(day.getDate() + 1);
+      return d >= day && d < next;
+    }
+    const days = { "7d": 7, "30d": 30, "90d": 90, "12m": 365 }[range] || 365;
     return now - d <= days * 86400000;
   };
   const inRange = (o) => dateInRange(o.date);
