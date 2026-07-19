@@ -360,3 +360,57 @@ export function oddbrewMonthly(orders, cfg, costIndex) {
     .map((r) => ({ ...r, profit: r.profit - fixed }))
     .sort((a, b) => a.month.localeCompare(b.month));
 }
+
+// Gross margin per variant: revenue (line price × qty) minus landed product
+// cost (the size rule's cost for each order's destination region). Fees and ad
+// spend are store-level, so this is product gross margin — the right basis for
+// "which cups make money" and for the discount headroom below.
+export function productMargins(orders, cfg) {
+  const rules = cfg.costRules || [];
+  const fx = cfg.costFx || 1;
+  const map = new Map();
+  for (const o of orders || []) {
+    const region = regionOf(o.country);
+    for (const it of o.items || []) {
+      if (isExcluded(it.name, cfg)) continue;
+      const key = it.sku ? "sku:" + squash(it.sku) : "name:" + squash(it.name);
+      let row = map.get(key);
+      if (!row) { row = { key, name: it.name || "(unnamed)", sku: it.sku || "", units: 0, revenue: 0, cost: 0, matched: false }; map.set(key, row); }
+      const qty = it.qty || 1;
+      row.units += qty;
+      row.revenue += (it.price || 0) * qty;
+      const rule = findCostRule(it.name, rules);
+      if (rule) { row.cost += ruleCost(rule, region) * fx * qty; row.matched = true; }
+      if (!row.sku && it.sku) row.sku = it.sku;
+    }
+  }
+  return Array.from(map.values()).map((r) => {
+    const profit = r.revenue - r.cost;
+    return {
+      ...r,
+      revenue: +r.revenue.toFixed(2),
+      cost: +r.cost.toFixed(2),
+      profit: +profit.toFixed(2),
+      unitCost: r.units ? +(r.cost / r.units).toFixed(2) : 0,
+      unitPrice: r.units ? +(r.revenue / r.units).toFixed(2) : 0,
+      margin: r.revenue > 0 ? (profit / r.revenue) * 100 : null,
+    };
+  }).sort((a, b) => b.revenue - a.revenue);
+}
+
+// Contribution per order at a given discount: what's left after the Shopify fee
+// and product cost. price is the pre-discount selling price of one order.
+export function discountContribution(price, cost, feePct, feeFixed, discountPct) {
+  const np = price * (1 - (discountPct || 0) / 100);
+  const contribution = np - np * ((feePct || 0) / 100) - (feeFixed || 0) - cost;
+  return { price: +np.toFixed(2), contribution: +contribution.toFixed(2), margin: np > 0 ? (contribution / np) * 100 : null };
+}
+
+// The biggest discount you can give before an order breaks even (contribution
+// hits £0), accounting for the Shopify fee. Above this you lose money per sale.
+export function maxDiscountPct(price, cost, feePct, feeFixed) {
+  if (!price || price <= 0) return 0;
+  const net = 1 - (feePct || 0) / 100;
+  const zeroPrice = ((cost || 0) + (feeFixed || 0)) / (net || 1); // price where contribution = 0
+  return Math.max(0, (1 - zeroPrice / price) * 100);
+}
