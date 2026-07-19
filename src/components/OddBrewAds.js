@@ -61,6 +61,23 @@ export default function OddBrewAds({ orders, cfg, invoices, adspend, saveCfg }) 
   const sum = campaigns.reduce((a, c) => { const e = evalC(c); a.spend += e.spend; a.revenue += e.revenue; a.profit += e.profit || 0; return a; }, { spend: 0, revenue: 0, profit: 0 });
   const blendedRoas = sum.spend > 0 ? sum.revenue / sum.spend : null;
 
+  // Scale / Hold / Stop zone from ROAS vs break-even and the target.
+  const zoneOf = (roas) => {
+    if (roas == null || breakEven == null) return null;
+    if (targetRoas != null && roas >= targetRoas) return "scale";
+    if (roas >= breakEven) return "hold";
+    return "stop";
+  };
+  const ZONE = {
+    scale: { label: "▲ Scale", cls: "green" },
+    hold: { label: "= Hold", cls: "amber" },
+    stop: { label: "▼ Stop", cls: "red" },
+  };
+  const zoneBadge = (roas) => {
+    const z = zoneOf(roas);
+    return z ? <span className={"badge " + ZONE[z].cls}>{ZONE[z].label}</span> : <span className="muted">—</span>;
+  };
+
   // Blended store ROAS (MER): every tracked ad pound vs all store revenue in the
   // window — a top-line sanity check, not per-campaign attribution.
   const adSpendRange = (adspend || []).filter((s) => inRange({ date: s.date })).reduce((a, s) => a + (s.amount || 0), 0);
@@ -179,6 +196,7 @@ export default function OddBrewAds({ orders, cfg, invoices, adspend, saveCfg }) 
                   <th className="num">ROAS</th>
                   <th className="num">Profit</th>
                   <th className="num">Verdict</th>
+                  <th className="num">Action</th>
                   <th></th>
                 </tr>
               </thead>
@@ -197,6 +215,7 @@ export default function OddBrewAds({ orders, cfg, invoices, adspend, saveCfg }) 
                           : e.good ? <span className="badge green">Profitable</span>
                             : <span className="badge red">Losing</span>}
                       </td>
+                      <td className="num">{zoneBadge(e.roas)}</td>
                       <td><button className="btn small danger" onClick={() => removeCampaign(i)}>✕</button></td>
                     </tr>
                   );
@@ -211,6 +230,7 @@ export default function OddBrewAds({ orders, cfg, invoices, adspend, saveCfg }) 
                     <td className="num">{fmtRoas(blendedRoas)}</td>
                     <td className="num" style={{ color: sum.profit >= 0 ? "var(--good)" : "var(--bad)" }}>{money(sum.profit, cur)}</td>
                     <td className="num">{breakEven != null && blendedRoas != null ? (blendedRoas >= breakEven ? <span className="badge green">Profitable</span> : <span className="badge red">Losing</span>) : <span className="muted">—</span>}</td>
+                    <td className="num">{zoneBadge(blendedRoas)}</td>
                     <td></td>
                   </tr>
                 </tfoot>
@@ -220,7 +240,19 @@ export default function OddBrewAds({ orders, cfg, invoices, adspend, saveCfg }) 
         ) : (
           <div className="muted mt">No campaigns yet — add one to check it against your break-even ROAS of <b>{fmtRoas(breakEven)}</b>.</div>
         )}
-        <div className="hint mt">Profit here is the campaign's contribution (revenue × {m != null ? (m * 100).toFixed(0) + "%" : "margin"} gross margin) minus its spend — what the ad itself made, before fixed overhead.</div>
+        <div className="mt" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <span className="badge green">▲ Scale</span>
+          <span className="muted small">ROAS ≥ {fmtRoas(targetRoas)} — profitable at your target, push more budget.</span>
+        </div>
+        <div className="mt" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <span className="badge amber">= Hold</span>
+          <span className="muted small">{fmtRoas(breakEven)}–{fmtRoas(targetRoas)} — making money but below target; keep it steady and optimise.</span>
+        </div>
+        <div className="mt" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <span className="badge red">▼ Stop</span>
+          <span className="muted small">Below {fmtRoas(breakEven)} — losing money on every sale; pause or rework it.</span>
+        </div>
+        <div className="hint mt">Profit is the campaign's contribution (revenue × {m != null ? (m * 100).toFixed(0) + "%" : "margin"} gross margin) minus its spend — what the ad itself made, before fixed overhead.</div>
       </div>
     </>
   );
