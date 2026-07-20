@@ -36,18 +36,34 @@ alter table public.render_jobs enable row level security;
 create policy "team full access" on public.render_jobs
   for all to authenticated using (true) with check (true);`;
 
+// A chip list of picked files with per-item remove.
+function FileChips({ items, onRemove }) {
+  if (!items.length) return null;
+  return (
+    <div className="row mt" style={{ flexWrap: "wrap", gap: 6 }}>
+      {items.map((f) => (
+        <span key={f.key} className="badge" style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: 220 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+          <button className="linklike" style={{ border: "none", background: "none", cursor: "pointer", padding: 0, lineHeight: 1 }} onClick={() => onRemove(f.key)} title="Remove">✕</button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function BlenderRenderPanel({ user }) {
   const [jobs, setJobs] = useState(null);
   const [ready, setReady] = useState(true);
-  const [card, setCard] = useState(null);
-  const [cardName, setCardName] = useState("");
-  const [art, setArt] = useState(null);
-  const [artName, setArtName] = useState("");
+  const [cards, setCards] = useState([]); // [{key,name,data}]
+  const [arts, setArts] = useState([]);
+  const [mode, setMode] = useState("matrix"); // matrix = every card × every background; pairs = card[i] with art[i]
   const [resX, setResX] = useState(2000);
   const [resY, setResY] = useState(2000);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [viewing, setViewing] = useState(null); // {id, result}
+  const cardRef = useRef(null);
+  const artRef = useRef(null);
   const timer = useRef(null);
 
   const fetchJobs = async () => {
@@ -55,7 +71,7 @@ export default function BlenderRenderPanel({ user }) {
       .from("render_jobs")
       .select("id,status,error,created_at,created_by_name,params")
       .order("created_at", { ascending: false })
-      .limit(25);
+      .limit(50);
     if (error) { setReady(false); return; }
     setReady(true);
     setJobs(data || []);
@@ -67,24 +83,45 @@ export default function BlenderRenderPanel({ user }) {
     return () => clearInterval(timer.current);
   }, []);
 
-  const pick = async (file, setData, setName) => {
-    if (!file) return;
-    setData(await readFile(file));
-    setName(file.name);
+  const pickMany = async (fileList, setList, inputRef) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setErr(null);
+    const read = await Promise.all(files.map(async (f) => ({ key: uid(), name: f.name, data: await readFile(f) })));
+    setList((prev) => [...prev, ...read]);
+    if (inputRef.current) inputRef.current.value = ""; // let the same file be re-picked later
   };
+  const removeFrom = (setList) => (key) => setList((prev) => prev.filter((f) => f.key !== key));
+
+  // Which (card, art) combinations will be queued.
+  const buildPairs = () => {
+    if (!cards.length || !arts.length) return [];
+    if (mode === "pairs") {
+      const n = Math.min(cards.length, arts.length);
+      return Array.from({ length: n }, (_, i) => [cards[i], arts[i]]);
+    }
+    const out = [];
+    for (const cd of cards) for (const a of arts) out.push([cd, a]);
+    return out;
+  };
+  const pairs = buildPairs();
+  const count = pairs.length;
 
   const submit = async () => {
     setErr(null);
-    if (!card || !art) return setErr("Add both a card image and a background artwork.");
+    if (!cards.length || !arts.length) return setErr("Add at least one card image and one background artwork.");
+    if (!count) return setErr("Nothing to queue with the current combine setting.");
     setBusy(true);
     try {
-      const { error } = await supabase.from("render_jobs").insert({
-        id: uid(), status: "queued", card_image: card, art_image: art,
-        params: { resX: Number(resX) || 2000, resY: Number(resY) || 2000, cardName, artName },
-        created_by: user.id, created_by_name: user.name,
-      });
+      const now = new Date().toISOString();
+      const rows = pairs.map(([cd, a]) => ({
+        id: uid(), status: "queued", card_image: cd.data, art_image: a.data,
+        params: { resX: Number(resX) || 2000, resY: Number(resY) || 2000, cardName: cd.name, artName: a.name },
+        created_by: user.id, created_by_name: user.name, created_at: now,
+      }));
+      const { error } = await supabase.from("render_jobs").insert(rows);
       if (error) throw new Error(error.message);
-      setCard(null); setArt(null); setCardName(""); setArtName("");
+      setCards([]); setArts([]);
       await fetchJobs();
     } catch (e) {
       setErr(e.message || String(e));
@@ -106,6 +143,13 @@ export default function BlenderRenderPanel({ user }) {
   };
   const download = (result) => { const a = document.createElement("a"); a.href = result; a.download = "kantoforge-render.png"; a.click(); };
   const remove = async (id) => { await supabase.from("render_jobs").delete().eq("id", id); fetchJobs(); };
+  const clearFinished = async () => {
+    const ids = (jobs || []).filter((j) => j.status === "done" || j.status === "failed").map((j) => j.id);
+    if (!ids.length) return;
+    if (!window.confirm(`Remove ${ids.length} finished render${ids.length === 1 ? "" : "s"} from the list?`)) return;
+    await supabase.from("render_jobs").delete().in("id", ids);
+    fetchJobs();
+  };
 
   if (!ready) {
     return (
@@ -118,36 +162,59 @@ export default function BlenderRenderPanel({ user }) {
   }
 
   const active = (jobs || []).filter((j) => j.status === "queued" || j.status === "rendering").length;
+  const bothMulti = cards.length > 1 && arts.length > 1;
 
   return (
     <>
       <div className="notice mb small">
-        🖥️ Renders run on your PC via the <b>KantoForge render agent</b> (see <code>blender/</code> in the repo). Queue a job
-        here, make sure the agent is running, and the finished image comes back below. {active > 0 ? <b>{active} in progress.</b> : null}
+        🖥️ Renders run on your PC via the <b>KantoForge render agent</b> (see <code>blender/</code> in the repo). Queue jobs
+        here, make sure the agent is running, and finished images come back below. {active > 0 ? <b>{active} in progress.</b> : null}
       </div>
       <div className="grid two">
         <div className="card" style={{ margin: 0 }}>
-          <h3>Queue a render</h3>
+          <h3>Queue renders</h3>
+          <div className="muted small mb">Add one or several of each — every job is one card on one background. Pick multiple to batch a whole set at once.</div>
+
           <label className="field mt">
-            <span className="lab">Card image</span>
-            <input type="file" accept="image/*" onChange={(e) => pick(e.target.files[0], setCard, setCardName)} />
-            {cardName && <span className="hint">{cardName}</span>}
+            <span className="lab">Card image{cards.length ? ` · ${cards.length}` : ""}</span>
+            <input ref={cardRef} type="file" accept="image/*" multiple onChange={(e) => pickMany(e.target.files, setCards, cardRef)} />
           </label>
-          <label className="field">
-            <span className="lab">Background artwork</span>
-            <input type="file" accept="image/*" onChange={(e) => pick(e.target.files[0], setArt, setArtName)} />
-            {artName && <span className="hint">{artName}</span>}
+          <FileChips items={cards} onRemove={removeFrom(setCards)} />
+
+          <label className="field mt">
+            <span className="lab">Background artwork{arts.length ? ` · ${arts.length}` : ""}</span>
+            <input ref={artRef} type="file" accept="image/*" multiple onChange={(e) => pickMany(e.target.files, setArts, artRef)} />
           </label>
-          <div className="form-row">
+          <FileChips items={arts} onRemove={removeFrom(setArts)} />
+
+          {bothMulti && (
+            <label className="field mt">
+              <span className="lab">Combine</span>
+              <select value={mode} onChange={(e) => setMode(e.target.value)}>
+                <option value="matrix">Every card on every background ({cards.length} × {arts.length})</option>
+                <option value="pairs">Pair in order (card 1 + bg 1, card 2 + bg 2…)</option>
+              </select>
+            </label>
+          )}
+
+          <div className="form-row mt">
             <label className="field"><span className="lab">Width</span><input type="number" value={resX} onChange={(e) => setResX(e.target.value)} /></label>
             <label className="field"><span className="lab">Height</span><input type="number" value={resY} onChange={(e) => setResY(e.target.value)} /></label>
           </div>
-          {err && <div className="notice bad mb">⚠️ {err}</div>}
-          <button className="btn primary" onClick={submit} disabled={busy}>{busy ? "Queuing…" : "🎬 Queue render"}</button>
+
+          {count > 0 && <div className="muted small mt">This will queue <b>{count}</b> render{count === 1 ? "" : "s"}{resX && resY ? ` at ${Number(resX) || 2000}×${Number(resY) || 2000}` : ""}.</div>}
+          {count > 24 && <div className="notice mt small">⚠️ That's a big batch — it'll tie up your render PC for a while. Trim the sets or switch to “Pair in order” if you didn't mean every combination.</div>}
+          {err && <div className="notice bad mb mt">⚠️ {err}</div>}
+          <button className="btn primary mt" onClick={submit} disabled={busy || !count}>{busy ? "Queuing…" : `🎬 Queue ${count || ""} render${count === 1 ? "" : "s"}`.replace("  ", " ")}</button>
         </div>
 
         <div className="card" style={{ margin: 0 }}>
-          <h3>Render jobs</h3>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>Render jobs</h3>
+            {(jobs || []).some((j) => j.status === "done" || j.status === "failed") && (
+              <button className="btn small" onClick={clearFinished}>Clear finished</button>
+            )}
+          </div>
           <div className="table-wrap mt">
             <table className="data">
               <thead><tr><th>Render</th><th>When</th><th>Status</th><th></th></tr></thead>
