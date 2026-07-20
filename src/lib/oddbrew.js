@@ -406,11 +406,17 @@ export function discountContribution(price, cost, feePct, feeFixed, discountPct)
   return { price: +np.toFixed(2), contribution: +contribution.toFixed(2), margin: np > 0 ? (contribution / np) * 100 : null };
 }
 
-// The biggest discount you can give before an order breaks even (contribution
-// hits £0), accounting for the Shopify fee. Above this you lose money per sale.
-export function maxDiscountPct(price, cost, feePct, feeFixed) {
+// The biggest discount you can give while still leaving at least `marginPct`
+// contribution margin, accounting for the Shopify fee. marginPct = 0 gives the
+// break-even discount (below which you lose money per sale).
+export function discountAtMargin(price, cost, feePct, feeFixed, marginPct) {
   if (!price || price <= 0) return 0;
   const net = 1 - (feePct || 0) / 100;
-  const zeroPrice = ((cost || 0) + (feeFixed || 0)) / (net || 1); // price where contribution = 0
-  return Math.max(0, (1 - zeroPrice / price) * 100);
+  const denom = net - (marginPct || 0) / 100;
+  if (denom <= 0) return 0; // that margin isn't reachable even at full price
+  const targetPrice = ((cost || 0) + (feeFixed || 0)) / denom;
+  return Math.max(0, (1 - targetPrice / price) * 100);
+}
+export function maxDiscountPct(price, cost, feePct, feeFixed) {
+  return discountAtMargin(price, cost, feePct, feeFixed, 0);
 }
