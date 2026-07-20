@@ -44,6 +44,34 @@ function Stat({ label, value, sub, tone, accent }) {
   );
 }
 
+const relTime = (iso) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  if (s < 7 * 86400) return Math.floor(s / 86400) + "d ago";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+};
+
+// One "last updated" pill for the activity strip.
+function ActivityChip({ icon, label, at, by, extra }) {
+  const when = relTime(at);
+  const stale = at && (Date.now() - new Date(at).getTime()) > 2 * 86400000;
+  return (
+    <div className="card" style={{ margin: 0, padding: "10px 14px", display: "flex", gap: 10, alignItems: "center", flex: "1 1 190px", minWidth: 180 }}>
+      <span style={{ fontSize: 18, opacity: 0.85 }}>{icon}</span>
+      <div style={{ lineHeight: 1.25 }}>
+        <div className="muted" style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontWeight: 700, fontSize: 14, color: when ? (stale ? "var(--bad)" : "var(--text)") : "var(--text-2)" }}>{when || "never"}</div>
+        <div className="muted small">{[by ? "by " + by : null, extra].filter(Boolean).join(" · ") || "—"}</div>
+      </div>
+    </div>
+  );
+}
+
 export default function OddBrewPage({ user }) {
   const [ready, setReady] = useState(true);
   const [orders, setOrders] = useState(null);
@@ -84,6 +112,18 @@ export default function OddBrewPage({ user }) {
     const raw = data && data.data ? data.data : null;
     setCfg(mergeConfig(raw));
     setConnected(!!(raw && raw.shopifyConnected));
+  };
+
+  // Stamp "who did what, when" for the activity strip. Reads config fresh first
+  // so it never clobbers the server's sync checkpoint.
+  const recordActivity = async (kind) => {
+    try {
+      const { data } = await supabase.from("oddbrew_config").select("data").eq("id", 1).maybeSingle();
+      const base = (data && data.data) || {};
+      const next = { ...base, activity: { ...(base.activity || {}), [kind]: { at: new Date().toISOString(), by: (user && user.name) || "" } } };
+      await supabase.from("oddbrew_config").upsert({ id: 1, data: next, updated_at: new Date().toISOString() });
+      setCfg(mergeConfig(next));
+    } catch (e) { /* non-critical */ }
   };
 
   const fetchInvoices = async () => {
@@ -206,6 +246,7 @@ export default function OddBrewPage({ user }) {
       }
       setMsg(`${note ? note + " " : ""}Imported ad spend — ${summary.join("; ")}.`);
       await fetchAdspend();
+      await recordActivity("adspend");
     } catch (e) {
       setErr(e.message || String(e));
     } finally {
@@ -221,6 +262,7 @@ export default function OddBrewPage({ user }) {
     if (error) return setErr(error.message);
     setManualDate(""); setManualAmt(""); setMsg("Ad spend saved.");
     fetchAdspend();
+    recordActivity("adspend");
   };
   const removeSpendDay = async (date) => { await supabase.from("oddbrew_adspend").delete().eq("id", date); fetchAdspend(); };
 
@@ -247,6 +289,7 @@ export default function OddBrewPage({ user }) {
       }
       setSyncResult(`Pulled ${total} order${total === 1 ? "" : "s"} from the OddBrew store.`);
       await fetchOrders();
+      await recordActivity("orders");
     } catch (e) {
       setErr(e.message || String(e));
     } finally {
@@ -291,7 +334,7 @@ export default function OddBrewPage({ user }) {
       {tab === "invoices" ? (
         <OddBrewInvoices user={user} orders={orders || []} cfg={cfg} />
       ) : tab === "analysis" ? (
-        <OddBrewAnalysis orders={orders || []} cfg={cfg} connected={connected} saveCfg={saveCfg} />
+        <OddBrewAnalysis orders={orders || []} cfg={cfg} connected={connected} saveCfg={saveCfg} onStockSynced={() => recordActivity("stock")} />
       ) : tab === "daily" ? (
         <OddBrewDaily orders={orders || []} adspend={adspend} invoices={invoices} cfg={cfg} connected={connected} saveCfg={saveCfg} onSync={() => runSync(false)} syncing={syncing} onReload={fetchAdspend} />
       ) : tab === "ads" ? (
@@ -300,6 +343,30 @@ export default function OddBrewPage({ user }) {
         <OddBrewMargins orders={orders || []} cfg={cfg} />
       ) : (
       <>
+      <div className="row mb" style={{ gap: 10, flexWrap: "wrap" }}>
+        <ActivityChip
+          icon="⟳" label="Orders synced"
+          at={(cfg.activity && cfg.activity.orders && cfg.activity.orders.at) || (cfg.sync && cfg.sync.lastSyncAt)}
+          by={cfg.activity && cfg.activity.orders && cfg.activity.orders.by}
+          extra={`${(orders || []).length} orders`}
+        />
+        {(() => {
+          const last = (invoices || []).reduce((m, i) => (i.savedAt && (!m || i.savedAt > m.at) ? { at: i.savedAt, by: i.savedByName } : m), null);
+          return <ActivityChip icon="🧾" label="Supplier invoice" at={last && last.at} by={last && last.by} extra={`${(invoices || []).length} in ledger`} />;
+        })()}
+        <ActivityChip
+          icon="📦" label="Stock synced"
+          at={cfg.activity && cfg.activity.stock && cfg.activity.stock.at}
+          by={cfg.activity && cfg.activity.stock && cfg.activity.stock.by}
+        />
+        <ActivityChip
+          icon="📣" label="Ad spend"
+          at={cfg.activity && cfg.activity.adspend && cfg.activity.adspend.at}
+          by={cfg.activity && cfg.activity.adspend && cfg.activity.adspend.by}
+          extra={`${(adspend || []).length} entries`}
+        />
+      </div>
+
       <div className="pills mb">
         {RANGES.map(([k, l]) => (
           <button key={k} className={range === k ? "active" : ""} onClick={() => setRange(k)}>{l}</button>
