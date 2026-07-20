@@ -23,7 +23,7 @@ function Metric({ label, value, tone }) {
 export default function OddBrewInvoices({ user, orders, cfg }) {
   const [ready, setReady] = useState(true);
   const [ledger, setLedger] = useState(null);
-  const [review, setReview] = useState(null); // reconciliation result awaiting save
+  const [reviews, setReviews] = useState([]); // reconciliation results awaiting save
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const fileRef = useRef(null);
@@ -39,31 +39,41 @@ export default function OddBrewInvoices({ user, orders, cfg }) {
   };
   useEffect(() => { fetchLedger(); }, []);
 
-  const onFile = async (file) => {
-    if (!file) return;
-    setErr(null); setReview(null); setBusy(true);
-    try {
-      const buf = await file.arrayBuffer();
-      const parsed = await parseInvoiceWorkbook(buf);
-      if (!parsed.orders.length) throw new Error("Couldn't find an order list in that file — is it the OMGO invoice with the order sheet?");
-      const rec = reconcileInvoice(parsed, orders, cfg);
-      setReview({ ...rec, fileName: file.name });
-    } catch (e) {
-      setErr(e.message || String(e));
-    } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
+  const onFiles = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setErr(null); setBusy(true);
+    const out = [];
+    for (const file of files) {
+      try {
+        const parsed = await parseInvoiceWorkbook(await file.arrayBuffer());
+        if (!parsed.orders.length) throw new Error("no order sheet found — is this the OMGO invoice?");
+        const rec = reconcileInvoice(parsed, orders, cfg);
+        out.push({ key: uid(), ...rec, fileName: file.name });
+      } catch (e) {
+        out.push({ key: uid(), fileName: file.name, error: e.message || String(e) });
+      }
     }
+    setReviews((prev) => [...prev, ...out]);
+    setBusy(false);
+    if (fileRef.current) fileRef.current.value = "";
   };
 
-  const saveToLedger = async () => {
-    if (!review) return;
+  const discardOne = (key) => setReviews((prev) => prev.filter((r) => r.key !== key));
+
+  const saveAll = async () => {
+    const good = reviews.filter((r) => !r.error);
+    if (!good.length) return;
     setBusy(true); setErr(null);
     try {
-      const rec = { id: uid(), ...review, status: "unpaid", savedAt: new Date().toISOString(), savedByName: user.name };
-      const { error } = await supabase.from("oddbrew_invoices").insert({ id: rec.id, data: rec, updated_at: new Date().toISOString() });
+      const rows = good.map((r) => {
+        const { key, ...rest } = r;
+        const rec = { id: uid(), ...rest, status: "unpaid", savedAt: new Date().toISOString(), savedByName: user.name };
+        return { id: rec.id, data: rec, updated_at: new Date().toISOString() };
+      });
+      const { error } = await supabase.from("oddbrew_invoices").insert(rows);
       if (error) throw new Error(error.message);
-      setReview(null);
+      setReviews([]);
       await fetchLedger();
     } catch (e) {
       setErr(e.message || String(e));
@@ -102,49 +112,58 @@ export default function OddBrewInvoices({ user, orders, cfg }) {
 
       <div className="card">
         <h3>Check a supplier invoice</h3>
-        <div className="muted small mt">Upload the OMGO <code>.xlsx</code> invoice. It reconciles the charged costs against your OddBrew orders and cost rules before you pay.</div>
+        <div className="muted small mt">Upload one or more OMGO <code>.xlsx</code> invoices. Each reconciles the charged costs against your OddBrew orders and cost rules before you pay — and their actual costs override the estimates in your P&amp;L.</div>
         <label className="field mt">
-          <span className="lab">Invoice file (.xlsx)</span>
-          <input ref={fileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => onFile(e.target.files[0])} disabled={busy} />
+          <span className="lab">Invoice files (.xlsx) — select several at once</span>
+          <input ref={fileRef} type="file" multiple accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => onFiles(e.target.files)} disabled={busy} />
         </label>
         {busy && <div className="muted small">Reading…</div>}
       </div>
 
-      {review && (
+      {reviews.length > 0 && (
         <div className="card mt">
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
-            <div>
-              <h3 style={{ marginBottom: 2 }}>{review.ref || review.fileName}</h3>
-              <div className="muted small">{review.orders} orders · {review.units} cups · {review.orderNumbers.join(", ")}</div>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <h3 style={{ margin: 0 }}>{reviews.length} invoice{reviews.length === 1 ? "" : "s"} to check</h3>
+            <div className="row" style={{ gap: 6 }}>
+              <button className="btn primary" onClick={saveAll} disabled={busy || !reviews.some((r) => !r.error)}>Save all to ledger</button>
+              <button className="btn" onClick={() => setReviews([])}>Discard all</button>
             </div>
-            <span className={"badge " + (review.ok ? "green" : "yellow")}>{review.ok ? "Looks right ✓" : "Check flags"}</span>
           </div>
 
-          <div className="grid mt" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
-            <Metric label="Expected (rules)" value={money(review.expectedUsd, usd)} />
-            <Metric label="Invoiced" value={review.invoicedUsd != null ? money(review.invoicedUsd, usd) : "—"} />
-            <Metric label="Shipping discount" value={money(review.discount, usd)} tone="var(--good)" />
-            <Metric
-              label="Variance"
-              value={review.variance != null ? money(review.variance, usd) : "—"}
-              tone={review.variance != null && Math.abs(review.variance) > 0.5 ? "var(--bad)" : "var(--good)"}
-            />
-            <Metric label="Invoiced (£)" value={review.invoicedGbp != null ? money(review.invoicedGbp, cur) : "—"} />
-            <Metric label="Order revenue" value={money(review.revenueStore, cur)} />
-          </div>
+          {reviews.map((r) => (
+            <div key={r.key} className="mt" style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}>
+              {r.error ? (
+                <div className="notice bad small">⚠️ <b>{r.fileName}</b>: {r.error} <button className="btn small" style={{ marginLeft: 8 }} onClick={() => discardOne(r.key)}>Remove</button></div>
+              ) : (
+                <>
+                  <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+                    <div>
+                      <b>{r.ref || r.fileName}</b>
+                      <div className="muted small">{r.orders} orders · {r.units} cups · {r.orderNumbers.join(", ")}</div>
+                    </div>
+                    <span className={"badge " + (r.ok ? "green" : "yellow")}>{r.ok ? "Looks right ✓" : "Check flags"}</span>
+                  </div>
 
-          {review.flags.length > 0 ? (
-            <div className="notice mt small">
-              {review.flags.map((f, i) => <div key={i}>⚠️ {f}</div>)}
+                  <div className="grid mt" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(138px, 1fr))", gap: 10 }}>
+                    <Metric label="Expected (rules)" value={money(r.expectedUsd, usd)} />
+                    <Metric label="Invoiced" value={r.invoicedUsd != null ? money(r.invoicedUsd, usd) : "—"} />
+                    <Metric label="Shipping discount" value={money(r.discount, usd)} tone="var(--good)" />
+                    <Metric label="Variance" value={r.variance != null ? money(r.variance, usd) : "—"} tone={r.variance != null && Math.abs(r.variance) > 0.5 ? "var(--bad)" : "var(--good)"} />
+                    <Metric label="Invoiced (£)" value={r.invoicedGbp != null ? money(r.invoicedGbp, cur) : "—"} />
+                    <Metric label="Order revenue" value={money(r.revenueStore, cur)} />
+                  </div>
+
+                  {r.flags.length > 0 ? (
+                    <div className="notice mt small">{r.flags.map((f, i) => <div key={i}>⚠️ {f}</div>)}</div>
+                  ) : (
+                    <div className="notice good mt small">✅ Rates match your sheet, all orders are in OddBrew, and the total reconciles.</div>
+                  )}
+
+                  <div className="row mt"><button className="btn small" onClick={() => discardOne(r.key)}>Discard this one</button></div>
+                </>
+              )}
             </div>
-          ) : (
-            <div className="notice good mt small">✅ Rates match your sheet, all orders are in OddBrew, and the total reconciles (difference is the ${review.discount} shipping discount).</div>
-          )}
-
-          <div className="row mt">
-            <button className="btn primary" onClick={saveToLedger} disabled={busy}>Save to ledger</button>
-            <button className="btn" onClick={() => setReview(null)}>Discard</button>
-          </div>
+          ))}
         </div>
       )}
 
