@@ -93,7 +93,7 @@ const chipStyle = (on) => ({
 });
 const textBtn = { background: "none", border: "none", padding: 0, color: "var(--accent, #6ea8fe)", cursor: "pointer", font: "inherit", textDecoration: "underline" };
 
-export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
+export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg, onStockSynced }) {
   const cur = cfg.currency || "GBP";
   const [range, setRange] = useState("all");
   const [inv, setInv] = useState([]);
@@ -229,6 +229,7 @@ export default function OddBrewAnalysis({ orders, cfg, connected, saveCfg }) {
       if (!body.ok) throw new Error(body.error || "Stock sync failed.");
       setSyncResult(`Pulled stock for ${body.variants} variant${body.variants === 1 ? "" : "s"} from Shopify.`);
       await fetchInv();
+      if (onStockSynced) onStockSynced();
     } catch (e) {
       setErr(e.message || String(e));
     } finally {
