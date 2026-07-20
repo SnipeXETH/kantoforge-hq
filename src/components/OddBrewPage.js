@@ -340,7 +340,7 @@ export default function OddBrewPage({ user }) {
       ) : tab === "ads" ? (
         <OddBrewAds orders={orders || []} cfg={cfg} invoices={invoices} adspend={adspend} saveCfg={saveCfg} />
       ) : tab === "margins" ? (
-        <OddBrewMargins orders={orders || []} cfg={cfg} />
+        <OddBrewMargins orders={orders || []} cfg={cfg} saveCfg={saveCfg} />
       ) : (
       <>
       <div className="row mb" style={{ gap: 10, flexWrap: "wrap" }}>
