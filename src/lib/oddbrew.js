@@ -18,6 +18,23 @@ function normalizeDay(v) {
   return isNaN(d) ? null : d.toISOString().slice(0, 10);
 }
 
+// The store's wall-clock calendar day. Shopify reports by the shop's timezone,
+// so we must bucket orders the same way — an order stored in UTC as 23:30 is
+// already the next day in the UK, and counting it under the UTC date leaks it
+// into the wrong day. "Europe/London" tracks GMT/BST automatically.
+export const STORE_TZ = "Europe/London";
+export function storeYmd(input, tz = STORE_TZ) {
+  const d = input instanceof Date ? input : new Date(input);
+  if (isNaN(d)) return "";
+  return d.toLocaleDateString("en-CA", { timeZone: tz }); // en-CA => YYYY-MM-DD
+}
+// Date-only arithmetic on a YYYY-MM-DD string (DST-safe: anchored at UTC noon).
+function addDaysYmd(ymd, delta) {
+  const d = new Date(ymd + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
 // Parse a Meta Ads Manager spend export. Two shapes are supported:
 //  - a daily breakdown (a "Day"/"Date" column) → per-day totals, or
 //  - a campaign table (no Day column, but "Reporting starts/ends") → a single
@@ -125,24 +142,23 @@ export const ODDBREW_RANGES = [
   ["today", "Today"], ["yesterday", "Yesterday"], ["7d", "7 days"],
   ["30d", "30 days"], ["90d", "90 days"], ["12m", "12 months"], ["all", "All time"],
 ];
-export function inOddbrewRange(dateStr, range) {
+export function inOddbrewRange(dateStr, range, tz = STORE_TZ) {
   if (range === "all") return true;
   if (!dateStr) return false;
-  const d = new Date(dateStr);
-  const now = new Date();
-  if (range === "today" || range === "yesterday") {
-    const day = new Date(now); day.setHours(0, 0, 0, 0);
-    if (range === "yesterday") day.setDate(day.getDate() - 1);
-    const next = new Date(day); next.setDate(day.getDate() + 1);
-    return d >= day && d < next;
-  }
+  const day = storeYmd(dateStr, tz);
+  if (!day) return false;
+  const today = storeYmd(new Date(), tz);
+  if (range === "today") return day === today;
+  if (range === "yesterday") return day === addDaysYmd(today, -1);
+  // rolling window of the last N store-local calendar days, inclusive of today
   const days = { "7d": 7, "30d": 30, "90d": 90, "12m": 365 }[range] || 365;
-  return now - d <= days * 86400000;
+  return day > addDaysYmd(today, -days) && day <= today;
 }
 
 export const ODDBREW_DEFAULTS = {
   storeName: "OddBrew",
   currency: "GBP",
+  timezone: "Europe/London", // bucket days/months by this zone, like Shopify does
   shopify: { paymentPct: 1.7, paymentFixed: 0.25 }, // Shopify Payments UK online
   cogsPct: 0, // extra cost of goods as % of revenue (optional)
   costPerOrder: 0, // extra flat cost per order (optional)
@@ -344,10 +360,11 @@ export function oddbrewTotals(orders, cfg, costIndex) {
 // overhead subtracted, so the bars sum to the net figure).
 export function oddbrewMonthly(orders, cfg, costIndex) {
   const idx = costIndex || new Map();
+  const tz = (cfg && cfg.timezone) || STORE_TZ;
   const map = new Map();
   for (const o of orders) {
     if (!o.date) continue;
-    const m = o.date.slice(0, 7);
+    const m = storeYmd(o.date, tz).slice(0, 7);
     const e = enrichOddbrew(o, cfg, idx.get(o.orderId));
     const cur = map.get(m) || { month: m, revenue: 0, profit: 0, orders: 0 };
     cur.revenue += e.revenue;

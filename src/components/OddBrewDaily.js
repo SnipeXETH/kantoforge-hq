@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { supabase } from "../lib/supabase";
 import { money } from "../lib/format";
-import { activeOrders, buildInvoiceCostIndex, oddbrewTotals } from "../lib/oddbrew";
+import { activeOrders, buildInvoiceCostIndex, oddbrewTotals, storeYmd, STORE_TZ } from "../lib/oddbrew";
 
 const ymd = (dt) => {
   const y = dt.getFullYear();
@@ -24,12 +24,13 @@ function Stat({ label, value, sub, tone, accent }) {
   );
 }
 
-const dayTotalsFor = (active, cfg, costIndex, dateStr) =>
-  oddbrewTotals(active.filter((o) => (o.date || "").slice(0, 10) === dateStr), cfg, costIndex);
+const dayTotalsFor = (active, cfg, costIndex, dateStr, tz) =>
+  oddbrewTotals(active.filter((o) => storeYmd(o.date, tz) === dateStr), cfg, costIndex);
 
 export default function OddBrewDaily({ orders, adspend, invoices, cfg, connected, onSync, syncing, onReload }) {
   const cur = cfg.currency || "GBP";
-  const todayStr = ymd(new Date());
+  const tz = cfg.timezone || STORE_TZ;
+  const todayStr = storeYmd(new Date(), tz);
   const [date, setDate] = useState(shiftDay(todayStr, -1)); // reconcile: yesterday
   const [spendInput, setSpendInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,7 +47,7 @@ export default function OddBrewDaily({ orders, adspend, invoices, cfg, connected
 
   // --- reconcile day ---
   const isFuture = date > todayStr;
-  const dayT = dayTotalsFor(active, cfg, costIndex, date);
+  const dayT = dayTotalsFor(active, cfg, costIndex, date, tz);
   const spendEntry = (adspend || []).find((s) => s.id === date);
   const savedSpend = spendEntry ? Number(spendEntry.amount) || 0 : null;
   const reconciled = savedSpend != null;
@@ -76,7 +77,7 @@ export default function OddBrewDaily({ orders, adspend, invoices, cfg, connected
   };
 
   // --- today's live estimate (not saved) ---
-  const todayT = dayTotalsFor(active, cfg, costIndex, todayStr);
+  const todayT = dayTotalsFor(active, cfg, costIndex, todayStr, tz);
   const estSpendNum = estSpend === "" ? 0 : parseFloat(estSpend) || 0;
   const estNet = todayT.grossProfit - estSpendNum;
   const estRoas = estSpendNum > 0 ? todayT.revenue / estSpendNum : null;
